@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - master
+permissions:
+  contents: read
 jobs:
   build:
     name: Build
@@ -25,9 +27,9 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Build and analyze
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Needed to get PR information, if any
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6 # https://github.com/gradle/actions/releases
+      - name: Build
         run: ./gradlew clean build
       - name: Rename JAR with Build Number
         run: |

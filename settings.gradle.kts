@@ -10,7 +10,20 @@ dependencyResolutionManagement {
         maven("https://repo.extendedclip.com/content/repositories/placeholderapi/") // PlaceholderAPI
         maven("https://repo.opencollab.dev/maven-snapshots/") // Floodgate, Bungeecord-proxy
         maven("https://repo.purpurmc.org/snapshots") // Purpur
-        maven("https://jitpack.io") // PremiumVanish, Vault, YamlAssist, RedisBungee
+        // JitPack builds arbitrary GitHub repositories, so only allow it to serve the groups we actually need from it
+        // (and only from it), to prevent it from shadowing artifacts of other repositories
+        exclusiveContent {
+            forRepository {
+                maven("https://jitpack.io") // PremiumVanish, Vault, YamlAssist, RedisBungee, delivery4j
+            }
+            filter {
+                includeGroup("com.github.LeonMangler")
+                includeGroup("com.github.MilkBowl")
+                includeGroup("com.github.NEZNAMY")
+                includeGroupAndSubgroups("com.github.limework")
+                includeGroupAndSubgroups("com.saicone")
+            }
+        }
         maven("https://mvn.lib.co.nz/public") // LibsDisguises
         maven("https://repo.william278.net/velocity/") // Velocity-proxy
         exclusiveContent {
