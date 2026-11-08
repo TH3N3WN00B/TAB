@@ -185,6 +185,6 @@ public class BungeeScoreboard extends SafeScoreboard<BungeeTabPlayer> {
     @Nullable
     private NumberFormat numberFormat(@Nullable TabComponent component) {
         return component == null ? null : component.toFixedFormat(baseComponentArray ->
-                new NumberFormat(NumberFormat.Type.FIXED, player.getPlatform().pickCorrectComponent((BaseComponent[]) baseComponentArray, player.getVersion())));
+                new NumberFormat(NumberFormat.Type.FIXED, player.getPlatform().pickCorrectComponent((BaseComponent[]) baseComponentArray, player.getVersion())), player.getVersion());
     }
 }

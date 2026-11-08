@@ -6,8 +6,8 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * This class tracks toggling of a feature using commands when "remember-toggle-choice" is enabled
@@ -23,9 +23,9 @@ public class ToggleManager {
     @NotNull
     private final String sectionName;
 
-    /** List of players who toggled the feature */
+    /** List of players who toggled the feature, accessed from command and feature threads */
     @NotNull
-    private final Set<String> toggledPlayers;
+    private final Set<String> toggledPlayers = ConcurrentHashMap.newKeySet();
 
     /**
      * Constructs new instance with given parameters and loads list of toggled players from the file.
@@ -38,7 +38,7 @@ public class ToggleManager {
     public ToggleManager(@NotNull ConfigurationFile playerDataFile, @NotNull String sectionName) {
         this.playerDataFile = playerDataFile;
         this.sectionName = sectionName;
-        toggledPlayers = new HashSet<>(playerDataFile.getStringList(sectionName, Collections.emptyList()));
+        toggledPlayers.addAll(playerDataFile.getStringList(sectionName, Collections.emptyList()));
     }
 
     /**
@@ -90,9 +90,13 @@ public class ToggleManager {
     }
 
     /**
-     * Saves list of toggled players into file.
+     * Saves list of toggled players into file. Saves are serialized on the file instance, because
+     * it is shared by toggle managers of multiple features and may be saved from multiple threads.
+     * The list is copied inside the lock, so the last save always writes the latest state.
      */
     private void save() {
-        playerDataFile.set(sectionName, new ArrayList<>(toggledPlayers));
+        synchronized (playerDataFile) {
+            playerDataFile.set(sectionName, new ArrayList<>(toggledPlayers));
+        }
     }
 }

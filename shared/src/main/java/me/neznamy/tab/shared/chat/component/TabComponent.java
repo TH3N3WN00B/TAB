@@ -4,6 +4,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
 import lombok.SneakyThrows;
+import me.neznamy.tab.shared.ProtocolVersion;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.chat.EnumChatFormat;
 import me.neznamy.tab.shared.chat.TabStyle;
@@ -38,13 +39,17 @@ public abstract class TabComponent {
             return "#" + start.getHexCode() + text;
         }
         StringBuilder sb = new StringBuilder();
-        List<Character> characters = new ArrayList<>();
+        List<Integer> characters = new ArrayList<>(); // Code points to not split surrogate pairs (such as emojis)
         List<TabStyle> modifiers = new ArrayList<>();
         TabStyle modifier = new TabStyle();
         for (int i=0; i<text.length(); i++) {
             char c = text.charAt(i);
             if (c == '§' && i < text.length() - 1) {
-                switch (text.charAt(i+1)) {
+                char code = text.charAt(i+1);
+                if ((code >= 'A') && (code <= 'Z')) {
+                    code = (char)(code + ' ');
+                }
+                switch (code) {
                     case 'l':
                         modifier.setBold(true);
                         i++;
@@ -69,26 +74,34 @@ public abstract class TabComponent {
                         modifier = new TabStyle();
                         i++;
                         break;
+                    case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                    case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'x':
+                        // Color code (or start of &x&r&r&g&g&b&b), gradient defines the color, drop it
+                        i++;
+                        break;
                     default:
                         // Invalid code
-                        characters.add('§');
+                        characters.add((int) '§');
                         modifiers.add(new TabStyle(modifier));
                         break;
                 }
             } else {
-                characters.add(c);
+                int codePoint = text.codePointAt(i);
+                if (Character.charCount(codePoint) == 2) i++; // Skip low surrogate
+                characters.add(codePoint);
                 modifiers.add(new TabStyle(modifier));
             }
         }
 
         int length = characters.size();
+        int steps = Math.max(1, length - 1); // Avoid division by zero, a single character uses start color
         for (int i=0; i<length; i++) {
-            int red = (int) (start.getRed() + (float)(end.getRed() - start.getRed())/(length-1)*i);
-            int green = (int) (start.getGreen() + (float)(end.getGreen() - start.getGreen())/(length-1)*i);
-            int blue = (int) (start.getBlue() + (float)(end.getBlue() - start.getBlue())/(length-1)*i);
+            int red = (int) (start.getRed() + (float)(end.getRed() - start.getRed())/steps*i);
+            int green = (int) (start.getGreen() + (float)(end.getGreen() - start.getGreen())/steps*i);
+            int blue = (int) (start.getBlue() + (float)(end.getBlue() - start.getBlue())/steps*i);
             sb.append(String.format("#%02X%02X%02X", red, green, blue));
             sb.append(modifiers.get(i).getMagicCodes());
-            sb.append(characters.get(i));
+            sb.appendCodePoint(characters.get(i));
         }
         return sb.toString();
     };
@@ -149,6 +162,13 @@ public abstract class TabComponent {
 
     @Nullable
     private Object fixedFormat;
+
+    /**
+     * FixedFormat for 1.21.9+ clients, cached separately from {@link #fixedFormat} for platforms
+     * where the result depends on client version (object components are not supported by older clients).
+     */
+    @Nullable
+    private Object fixedFormatModern;
 
     /** TextHolder object for Velocity */
     @Nullable
@@ -234,6 +254,32 @@ public abstract class TabComponent {
     public <F, C> F toFixedFormat(@NotNull Function<C, F> createFunction) {
         if (fixedFormat == null) fixedFormat = createFunction.apply(convert());
         return (F) fixedFormat;
+    }
+
+    /**
+     * Creates a FixedFormat using given platform-specific create function for the given client version.
+     * This method should be used instead of {@link #toFixedFormat(Function)} if the result of the create
+     * function depends on client version. The value is cached separately for 1.21.9+ clients
+     * (which support object components) and older clients.
+     *
+     * @param   createFunction
+     *          Platform's function to convert platform component to FixedFormat for the given client version
+     * @param   version
+     *          Version of the client the FixedFormat will be sent to
+     * @return  Platform's FixedFormat from this component for the given client version
+     * @param   <F>
+     *          Platform's FixedFormat type
+     * @param   <C>
+     *          Platform's Component type
+     */
+    @SuppressWarnings("unchecked")
+    @SneakyThrows
+    public <F, C> F toFixedFormat(@NotNull Function<C, F> createFunction, @NotNull ProtocolVersion version) {
+        if (version.getNetworkId() >= ProtocolVersion.V1_21_9.getNetworkId()) {
+            if (fixedFormatModern == null) fixedFormatModern = createFunction.apply(convert());
+            return (F) fixedFormatModern;
+        }
+        return toFixedFormat(createFunction);
     }
 
     /**
@@ -349,8 +395,9 @@ public abstract class TabComponent {
             if (c == '<') {
                 boolean matched = false;
                 for (Map.Entry<Pattern, Function<Matcher, TabComponent>> entry : OBJECT_PATTERNS.entrySet()) {
-                    Matcher matcher = entry.getKey().matcher(text.substring(i));
-                    if (matcher.find() && matcher.start() == 0) {
+                    Matcher matcher = entry.getKey().matcher(text);
+                    matcher.region(i, text.length());
+                    if (matcher.lookingAt()) {
                         // flush current builder
                         if (builder.length() > 0) {
                             component.setText(builder.toString());

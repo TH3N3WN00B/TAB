@@ -111,7 +111,7 @@ public record ForgePlatform(MinecraftServer server) implements BackendPlatform {
 
     @Override
     public void registerCommand() {
-        ForgeTAB.COMMAND_DISPATCHER.getRoot().addChild(new ForgeTabCommand(getCommand()).getCommand());
+        ForgeTAB.registerCommand(new ForgeTabCommand(getCommand()).getCommand());
     }
 
     @Override
@@ -242,7 +242,7 @@ public record ForgePlatform(MinecraftServer server) implements BackendPlatform {
                 return 0;
             }
         };
-        ForgeTAB.COMMAND_DISPATCHER.getRoot().addChild(command.getCommand());
+        ForgeTAB.registerCommand(command.getCommand());
     }
 
     @Override

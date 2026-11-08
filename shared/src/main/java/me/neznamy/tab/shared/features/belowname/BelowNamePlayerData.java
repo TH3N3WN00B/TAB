@@ -27,4 +27,7 @@ public class BelowNamePlayerData {
 
     /** Visibility forced using the API, {@code null} if not forced */
     @Nullable public volatile Boolean forcedEnabled;
+
+    /** Nickname last processed as score holder of this player, used to remove the old score on nickname change */
+    @Nullable public String scoreHolder;
 }

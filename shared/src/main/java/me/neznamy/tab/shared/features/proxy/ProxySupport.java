@@ -12,6 +12,7 @@ import me.neznamy.tab.shared.features.proxy.message.*;
 import me.neznamy.tab.shared.features.types.*;
 import me.neznamy.tab.shared.platform.TabPlayer;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Base64;
 import java.util.HashMap;
@@ -86,6 +87,7 @@ public abstract class ProxySupport extends TabFeature implements JoinListener, Q
         ProxyMessage proxyMessage;
         try {
             proxyMessage = function.apply(in);
+            proxyMessage.setSourceProxy(proxy);
             TAB.getInstance().debug("[Proxy Support] Decoded message " + proxyMessage);
         } catch (Exception e) {
             TAB.getInstance().getErrorManager().printError("Failed to decode proxy message \"" + new String(Base64.getDecoder().decode(msg)) + "\" ", e);
@@ -179,5 +181,47 @@ public abstract class ProxySupport extends TabFeature implements JoinListener, Q
     @Override
     public void onVanishStatusChange(@NotNull TabPlayer player) {
         sendMessage(new UpdateVanishStatus(player.getUniqueId(), player.isVanished()));
+    }
+
+    /**
+     * Returns proxy player with given UUID if they are connected to the proxy which sent the given message.
+     * If the player is connected to a different proxy, the message belongs to a different session of the
+     * player (a late message from the previous proxy or a message from the new proxy which arrived before
+     * its join message), so {@code null} is returned and the data should be queued instead.
+     *
+     * @param   playerId
+     *          UUID of the player
+     * @param   message
+     *          Message which is being processed
+     * @return  Proxy player connected to the proxy which sent the message or {@code null} if there is none
+     */
+    @Nullable
+    public ProxyPlayer getProxyPlayer(@NotNull UUID playerId, @NotNull ProxyMessage message) {
+        ProxyPlayer player = proxyPlayers.get(playerId);
+        if (player == null || !isSameProxy(player.getProxyId(), message.getSourceProxy())) return null;
+        return player;
+    }
+
+    /**
+     * Removes queued data which has been waiting for player join for too long. Such data belongs
+     * to players who will never join (for example it arrived after the player already quit).
+     */
+    public void purgeExpiredQueuedData() {
+        long now = System.currentTimeMillis();
+        queuedData.values().removeIf(data -> now - data.getCreationTime() > QueuedData.EXPIRE_MILLIS);
+    }
+
+    /**
+     * Returns {@code true} if both proxy UUIDs represent the same proxy. If any of them is {@code null}
+     * (unknown sender), {@code true} is returned.
+     *
+     * @param   proxy1
+     *          First proxy UUID
+     * @param   proxy2
+     *          Second proxy UUID
+     * @return  {@code true} if proxies are the same or one of them is unknown, {@code false} otherwise
+     */
+    public static boolean isSameProxy(@Nullable String proxy1, @Nullable String proxy2) {
+        return proxy1 == null || proxy2 == null || proxy1.equals(proxy2);
     }
 }

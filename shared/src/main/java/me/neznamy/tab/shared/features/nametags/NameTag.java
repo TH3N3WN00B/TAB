@@ -102,6 +102,9 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
             }
             if (all.isVanished() && !connectedPlayer.canSee(all)) {
                 all.teamData.vanishedFor.add(connectedPlayer.getUniqueId());
+            } else {
+                // Recompute instead of keeping a possibly outdated entry
+                all.teamData.vanishedFor.remove(connectedPlayer.getUniqueId());
             }
             if (!all.teamData.isDisabled()) {
                 registerTeam(all, connectedPlayer);
@@ -115,14 +118,18 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
                 proxyPlayer.setNametag(null);
             }
         }
-        if (disableChecker.isDisableConditionMet(connectedPlayer)) {
+        boolean disabled = disableChecker.isDisableConditionMet(connectedPlayer);
+        if (disabled) {
             connectedPlayer.teamData.disabled.set(true);
-            return;
+        } else {
+            registerTeam(connectedPlayer);
         }
-        registerTeam(connectedPlayer);
         if (proxy != null) {
+            // Teams of proxy players are registered even if connected player's own nametag is disabled
             for (ProxyPlayer proxied : proxy.getProxyPlayers().values()) {
                 if (proxied.getNametag() == null) continue; // This proxy player is not loaded yet
+                if (proxied.getNametag().isDisabled()) continue; // Nametag of this proxy player is disabled
+                if (proxied.getConnectionState() != ProxyPlayer.ConnectionState.CONNECTED) continue; // Not displayed yet
                 connectedPlayer.teamData.registerTeam(
                         proxied,
                         proxied.getNametag().getResolvedTeamName(),
@@ -135,7 +142,7 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
                         lastColorCache.get(proxied.getNametag().getPrefix()).getLastStyle().toEnumChatFormat()
                 );
             }
-            proxyHandler.sendProxyMessage(connectedPlayer);
+            if (!disabled) proxyHandler.sendProxyMessage(connectedPlayer);
         }
     }
 
@@ -144,6 +151,9 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
         onlinePlayers.removePlayer(disconnectedPlayer);
         unregisterTeam(disconnectedPlayer);
         disconnectedPlayer.teamData.clearRegisteredTeams();
+        for (TabPlayer all : onlinePlayers.getPlayers()) {
+            all.teamData.vanishedFor.remove(disconnectedPlayer.getUniqueId());
+        }
     }
 
     @Override
@@ -277,6 +287,7 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
         customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
             // Function ran before onJoin did (super rare), drop action since onJoin will use new team name anyway
             if (player.teamData.teamName == null) return;
+            if (!onlinePlayers.contains(player)) return; // Player already left, do not register the team again
             for (TabPlayer viewer : onlinePlayers.getPlayers()) {
                 viewer.teamData.unregisterTeam(player);
             }
@@ -286,6 +297,54 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
             }
             proxyHandler.sendProxyMessage(player);
         }, getFeatureName(), "Updating team name"));
+    }
+
+    /**
+     * Processes nickname change of a player by re-registering their team with the new nickname
+     * to everyone who should see it.
+     *
+     * @param   player
+     *          Player whose nickname has changed
+     */
+    public void processNicknameChange(@NonNull TabPlayer player) {
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!onlinePlayers.contains(player)) return; // Player not loaded yet or already left
+            if (player.teamData.isDisabled()) return;
+            for (TabPlayer viewer : onlinePlayers.getPlayers()) {
+                viewer.teamData.unregisterTeam(player);
+                registerTeam(player, viewer);
+            }
+        }, getFeatureName(), TabConstants.CpuUsageCategory.NICKNAME_CHANGE_PROCESS));
+    }
+
+    /**
+     * Processes nickname change of a proxy player by re-registering their team with the new nickname.
+     *
+     * @param   player
+     *          Proxy player whose nickname has changed
+     */
+    public void processNicknameChange(@NonNull ProxyPlayer player) {
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            NameTagProxyPlayerData nametag = player.getNametag();
+            if (nametag == null || nametag.isDisabled()) return; // Not registered
+            if (player.getConnectionState() != ProxyPlayer.ConnectionState.CONNECTED) return; // Not displayed
+            String teamName = nametag.getResolvedTeamName();
+            if (teamName == null) return;
+            for (TabPlayer viewer : onlinePlayers.getPlayers()) {
+                viewer.teamData.unregisterTeam(player);
+                viewer.teamData.registerTeam(
+                        player,
+                        teamName,
+                        prefixCache.get(nametag.getPrefix()),
+                        suffixCache.get(nametag.getSuffix()),
+                        nametag.getNameVisibility(),
+                        CollisionRule.ALWAYS,
+                        Collections.singletonList(player.getNickname()),
+                        teamOptions,
+                        lastColorCache.get(nametag.getPrefix()).getLastStyle().toEnumChatFormat()
+                );
+            }
+        }, getFeatureName(), TabConstants.CpuUsageCategory.NICKNAME_CHANGE_PROCESS));
     }
 
     @Override
@@ -406,6 +465,7 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
             TabPlayer p = (TabPlayer) player;
             p.ensureLoaded();
             if (!p.teamData.teamHandlingPaused) return;
+            if (!onlinePlayers.contains(p)) return; // Player already left, do not register the team again
             p.teamData.teamHandlingPaused = false; //setting before, so registerTeam method runs
             if (!p.teamData.isDisabled()) registerTeam(p);
         }, getFeatureName(), "Processing API call (resumeTeamHandling)"));
@@ -515,7 +575,7 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
 
     @Override
     public void toggleNameTagVisibilityView(@NonNull me.neznamy.tab.api.TabPlayer p, boolean sendToggleMessage) {
-        setNameTagVisibilityView((TabPlayer) p, ((TabPlayer) p).teamData.invisibleNameTagView, sendToggleMessage);
+        setNameTagVisibilityView((TabPlayer) p, null, sendToggleMessage);
     }
 
     @Override
@@ -528,18 +588,31 @@ public class NameTag extends TabFeature implements NameTagManager, JoinListener,
         setNameTagVisibilityView((TabPlayer) p, false, sendToggleMessage);
     }
 
-    private void setNameTagVisibilityView(@NonNull TabPlayer player, boolean visible, boolean sendToggleMessage) {
+    /**
+     * Changes nametag visibility view of the player. The change is processed in this feature's thread.
+     *
+     * @param   player
+     *          Player to change nametag view of
+     * @param   visibleOrToggle
+     *          {@code true} to show nametags, {@code false} to hide them, {@code null} to toggle the current state
+     * @param   sendToggleMessage
+     *          Whether toggle message should be sent to the player or not
+     */
+    private void setNameTagVisibilityView(@NonNull TabPlayer player, @Nullable Boolean visibleOrToggle, boolean sendToggleMessage) {
         ensureActive();
-        if (player.teamData.invisibleNameTagView != visible) return;
-        player.teamData.invisibleNameTagView = !visible;
-        if (sendToggleMessage) {
-            MessageFile messageFile = TAB.getInstance().getConfiguration().getMessages();
-            player.sendMessage(visible ? messageFile.getNameTagViewShown() :messageFile.getNameTagViewHidden());
-        }
-        player.expansionData.setNameTagVisibility(visible);
-        for (TabPlayer all : onlinePlayers.getPlayers()) {
-            visibilityManager.updateVisibility(all, player);
-        }
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            boolean visible = visibleOrToggle != null ? visibleOrToggle : player.teamData.invisibleNameTagView;
+            if (player.teamData.invisibleNameTagView != visible) return;
+            player.teamData.invisibleNameTagView = !visible;
+            if (sendToggleMessage) {
+                MessageFile messageFile = TAB.getInstance().getConfiguration().getMessages();
+                player.sendMessage(visible ? messageFile.getNameTagViewShown() :messageFile.getNameTagViewHidden());
+            }
+            player.expansionData.setNameTagVisibility(visible);
+            for (TabPlayer all : onlinePlayers.getPlayers()) {
+                visibilityManager.updateVisibility(all, player);
+            }
+        }, getFeatureName(), "Processing API call (setNameTagVisibilityView)"));
     }
 
     @Override

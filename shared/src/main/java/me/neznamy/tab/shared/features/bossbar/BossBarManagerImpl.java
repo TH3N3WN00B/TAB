@@ -89,16 +89,35 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
     @Override
     public void refresh(@NotNull TabPlayer p, boolean force) {
         if (!hasBossBarVisible(p)) return;
-        boolean conditionResultChange = false;
+        // Only process bars whose condition result changed, leaving other bars (including ones shown using API) alone
+        List<BossBarLine> added = null;
         for (BossBarLine line : lineValues) {
-            if (line.isConditionMet(p) != p.bossbarData.visibleBossBars.containsKey(line))
-                conditionResultChange = true;
-        }
-        if (conditionResultChange) {
-            for (BossBar line : lineValues) {
-                line.removePlayer(p); //remove all BossBars and then resend them again to keep them displayed in defined order
+            boolean met = line.isConditionMet(p);
+            if (met == p.bossbarData.conditionsMet.contains(line)) continue;
+            if (met) {
+                p.bossbarData.conditionsMet.add(line);
+                if (!line.isAnnouncementBar() || line.isBeingAnnounced()) {
+                    if (added == null) added = new ArrayList<>();
+                    added.add(line);
+                }
+            } else {
+                p.bossbarData.conditionsMet.remove(line);
+                line.removePlayer(p);
             }
-            showBossBars(p);
+        }
+        if (added == null) return;
+        // Resend bars displayed below the first added bar as well to keep them displayed in defined order
+        List<BossBarLine> resend = new ArrayList<>();
+        for (BossBarLine line : lineValues) {
+            if (added.contains(line) || (!resend.isEmpty() && line.containsPlayer(p))) {
+                resend.add(line);
+            }
+        }
+        for (BossBarLine line : resend) {
+            line.removePlayer(p);
+        }
+        for (BossBarLine line : resend) {
+            line.addPlayer(p);
         }
     }
 
@@ -106,7 +125,7 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
     public void onJoin(@NotNull TabPlayer connectedPlayer) {
         connectedPlayer.expansionData.setBossBarVisible(false);
         if (toggleManager != null) toggleManager.convert(connectedPlayer);
-        setBossBarVisible(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
+        updateBossBarVisibility(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
     }
 
     /**
@@ -127,8 +146,10 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
      *          Player to show boss bars to
      */
     private void showBossBars(@NonNull TabPlayer p) {
+        p.bossbarData.conditionsMet.clear();
         for (BossBarLine bossbar : lineValues) {
             if (bossbar.isConditionMet(p)) {
+                p.bossbarData.conditionsMet.add(bossbar);
                 if (!bossbar.isAnnouncementBar() || bossbar.isBeingAnnounced()) {
                     bossbar.addPlayer(p);
                 }
@@ -186,13 +207,9 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
     @Override
     public void removeBossBar(@NonNull String name) {
         ensureActive();
-        BossBar bar = registeredBossBars.remove(name);
+        BossBarLine bar = registeredBossBars.remove(name);
         if (bar == null) throw new IllegalArgumentException("No registered BossBar found with name " + name);
-        lineValues = registeredBossBars.values().toArray(new BossBarLine[0]);
-        for (TabPlayer player : TAB.getInstance().getOnlinePlayers()) {
-            bar.removePlayer(player);
-            player.bossbarData.visibleBossBars.remove(bar);
-        }
+        processRemoval(bar);
     }
 
     @Override
@@ -202,17 +219,35 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
         if (!registeredBossBars.remove(bar.getName(), bar)) {
             throw new IllegalArgumentException("This bossbar (" + bar.getName() + ") is not registered.");
         }
+        processRemoval(bar);
+    }
+
+    /**
+     * Stops processing the bar, then removes it from all players and unregisters
+     * its features and placeholders in feature thread.
+     *
+     * @param   bar
+     *          Bar which was removed from registered bars
+     */
+    private void processRemoval(@NotNull BossBarLine bar) {
         lineValues = registeredBossBars.values().toArray(new BossBarLine[0]);
-        for (TabPlayer player : TAB.getInstance().getOnlinePlayers()) {
-            bar.removePlayer(player);
-            player.bossbarData.visibleBossBars.remove(bar);
-        }
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            for (TabPlayer player : TAB.getInstance().getOnlinePlayers()) {
+                bar.removePlayer(player);
+                player.bossbarData.conditionsMet.remove(bar);
+            }
+            bar.unregisterFeatures();
+        }, getFeatureName(), "Removing BossBar"));
     }
 
     @Override
-    public void toggleBossBar(@NonNull me.neznamy.tab.api.TabPlayer player, boolean sendToggleMessage) {
+    public void toggleBossBar(@NonNull me.neznamy.tab.api.TabPlayer p, boolean sendToggleMessage) {
         ensureActive();
-        setBossBarVisible(player, !hasBossBarVisible(player), sendToggleMessage);
+        TabPlayer player = (TabPlayer) p;
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!player.isOnline()) return; // Player disconnected in the meantime
+            updateBossBarVisibility(player, !player.bossbarData.visible, sendToggleMessage);
+        }, getFeatureName(), "Toggling BossBar"));
     }
 
     @Override
@@ -225,6 +260,24 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
     public void setBossBarVisible(@NonNull me.neznamy.tab.api.TabPlayer p, boolean visible, boolean sendToggleMessage) {
         ensureActive();
         TabPlayer player = (TabPlayer) p;
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!player.isOnline()) return; // Player disconnected in the meantime
+            updateBossBarVisibility(player, visible, sendToggleMessage);
+        }, getFeatureName(), "Toggling BossBar"));
+    }
+
+    /**
+     * Sets BossBar visibility of player to set value. If value did not change, nothing happens.
+     * Must be called from feature thread.
+     *
+     * @param   player
+     *          Player to set BossBar visibility of
+     * @param   visible
+     *          {@code true} if BossBar should be visible, {@code false} if not
+     * @param   sendToggleMessage
+     *          {@code true} if toggle message should be sent if value changed, {@code false} if not
+     */
+    private void updateBossBarVisibility(@NotNull TabPlayer player, boolean visible, boolean sendToggleMessage) {
         if (player.bossbarData.visible == visible) return;
         if (visible) {
             player.bossbarData.visible = true;
@@ -272,8 +325,11 @@ public class BossBarManagerImpl extends RefreshableFeature implements BossBarMan
         BossBarLine line = registeredBossBars.get(bossBar);
         if (line == null) throw new IllegalArgumentException("No registered BossBar found with name " + bossBar);
         if (!line.isAnnouncementBar()) throw new IllegalArgumentException("BossBar " + bossBar + " is not an announcement bar");
-        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> line.announce(duration), getFeatureName(), "Adding announced BossBar"));
-        customThread.executeLater(new TimedCaughtTask(TAB.getInstance().getCpu(), line::unAnnounce, getFeatureName(), "Removing announced BossBar"), duration*1000);
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            int announcementId = line.announce(duration);
+            customThread.executeLater(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> line.unAnnounce(announcementId),
+                    getFeatureName(), "Removing announced BossBar"), duration*1000);
+        }, getFeatureName(), "Adding announced BossBar"));
     }
 
     @Override

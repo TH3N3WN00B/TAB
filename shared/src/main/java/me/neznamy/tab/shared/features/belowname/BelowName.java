@@ -99,6 +99,7 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
         player.belowNameData.fancyValue = new Property(this, player, configuration.getFancyValue());
         player.belowNameData.title = new Property(titleRefresher, player, configuration.getTitle());
         player.belowNameData.defaultNumberFormat = new Property(titleRefresher, player, configuration.getFancyValueDefault());
+        player.belowNameData.scoreHolder = player.getNickname();
     }
 
     @Override
@@ -221,6 +222,7 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     @Override
     public void refresh(@NotNull TabPlayer refreshed, boolean force) {
         if (refreshed.belowNameData.value == null) return; // Player not loaded yet (refresh called before onJoin)
+        if (!refreshed.isOnline() || !onlinePlayers.contains(refreshed)) return; // Player already left
         int value = getValue(refreshed);
         Property fancyValue = refreshed.belowNameData.fancyValue;
         fancyValue.update();
@@ -305,6 +307,12 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
      */
     public void processNicknameChange(@NotNull TabPlayer player) {
         customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!onlinePlayers.contains(player)) return; // Player not loaded yet or already left
+            String oldNickname = player.belowNameData.scoreHolder;
+            player.belowNameData.scoreHolder = player.getNickname();
+            if (oldNickname != null && !oldNickname.equals(player.getNickname())) {
+                removeScore(oldNickname);
+            }
             int value = getValue(player);
             for (TabPlayer viewer : onlinePlayers.getPlayers()) {
                 setScore(viewer, player, value, player.belowNameData.fancyValue.get());
@@ -312,10 +320,62 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
         }, getFeatureName(), TabConstants.CpuUsageCategory.NICKNAME_CHANGE_PROCESS));
     }
 
+    /**
+     * Processes nickname change of a proxy player by removing score of the old nickname
+     * and setting score with the new nickname.
+     *
+     * @param   player
+     *          Proxy player whose nickname has changed
+     * @param   oldNickname
+     *          Nickname the player had before
+     */
+    public void processNicknameChange(@NotNull ProxyPlayer player, @NotNull String oldNickname) {
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (player.getConnectionState() != ProxyPlayer.ConnectionState.CONNECTED) return; // Not displayed
+            if (player.getBelowname() == null) return; // Player not loaded yet
+            if (!oldNickname.equals(player.getNickname()) && !isUsedByLocalPlayer(oldNickname)) {
+                removeScore(oldNickname);
+            }
+            updatePlayer(player);
+        }, getFeatureName(), TabConstants.CpuUsageCategory.NICKNAME_CHANGE_PROCESS));
+    }
+
+    /**
+     * Removes score of given score holder for all viewers who have this objective registered.
+     *
+     * @param   scoreHolder
+     *          Score holder to remove
+     */
+    private void removeScore(@NotNull String scoreHolder) {
+        for (TabPlayer viewer : onlinePlayers.getPlayers()) {
+            if (viewer.belowNameData.disabled.get()) continue; // Objective is not registered
+            viewer.getScoreboard().removeScore(OBJECTIVE_NAME, scoreHolder);
+        }
+    }
+
+    /**
+     * Returns {@code true} if given nickname is used as score holder by a player connected to this server.
+     *
+     * @param   nickname
+     *          Nickname to check
+     * @return  {@code true} if a connected player uses this nickname, {@code false} if not
+     */
+    private boolean isUsedByLocalPlayer(@NotNull String nickname) {
+        for (TabPlayer all : onlinePlayers.getPlayers()) {
+            if (nickname.equals(all.getNickname())) return true;
+        }
+        return false;
+    }
+
     @Override
     public void onQuit(@NotNull TabPlayer disconnectedPlayer) {
         disconnectedPlayer.setBelowNameDistance(10); // Reset to default distance
         onlinePlayers.removePlayer(disconnectedPlayer);
+        removeScore(disconnectedPlayer.getNickname());
+        String scoreHolder = disconnectedPlayer.belowNameData.scoreHolder;
+        if (scoreHolder != null && !scoreHolder.equals(disconnectedPlayer.getNickname())) {
+            removeScore(scoreHolder); // Nickname change was not processed yet
+        }
     }
 
     @NotNull
@@ -445,6 +505,13 @@ public class BelowName extends RefreshableFeature implements JoinListener, QuitL
     @Override
     public void onJoin(@NotNull ProxyPlayer player) {
         updatePlayer(player);
+    }
+
+    @Override
+    public void onQuit(@NotNull ProxyPlayer player) {
+        if (player.getBelowname() == null) return; // Score was never sent
+        if (isUsedByLocalPlayer(player.getNickname())) return; // Player is connected here now, score belongs to them
+        removeScore(player.getNickname());
     }
 
     /**

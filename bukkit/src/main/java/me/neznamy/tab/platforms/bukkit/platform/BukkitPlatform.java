@@ -197,10 +197,11 @@ public class BukkitPlatform implements BackendPlatform {
         ppl[0] = TAB.getInstance().getPlaceholderManager().registerPlayerPlaceholder(identifier, p -> {
             Bukkit.getScheduler().runTask(plugin, () -> {
                 long time = System.nanoTime();
-                ppl[0].updateValue(p, placeholderAPI ? PlaceholderAPI.setPlaceholders((Player) p.getPlayer(), syncedPlaceholder) : identifier);
+                String output = placeholderAPI ? PlaceholderAPI.setPlaceholders((Player) p.getPlayer(), syncedPlaceholder) : identifier;
                 long totalTime =  System.nanoTime()-time;
                 TAB.getInstance().getCPUManager().addPlaceholderTime(identifier, totalTime);
                 TAB.getInstance().getCpu().addTime(TAB.getInstance().getPlaceholderManager().getFeatureName(), TabConstants.CpuUsageCategory.PLACEHOLDER_REQUEST, totalTime);
+                TAB.getInstance().getCPUManager().runTask(() -> ppl[0].updateValue(p, output)); // Process refresh in TAB's thread
             });
             return null;
         });
@@ -328,8 +329,9 @@ public class BukkitPlatform implements BackendPlatform {
     @Override
     public void unregisterAllCustomCommands() {
         for (Command command : customCommands) {
-            knownCommands.remove(command.getName());
-            knownCommands.remove(command.getName() + ":" + command.getName());
+            // Only remove entries pointing to our command, the bare label may belong to another plugin
+            knownCommands.remove(command.getName(), command);
+            knownCommands.remove(command.getName() + ":" + command.getName(), command);
             command.unregister(commandMap);
         }
         customCommands.clear();

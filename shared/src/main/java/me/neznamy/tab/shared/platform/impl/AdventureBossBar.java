@@ -37,6 +37,11 @@ public class AdventureBossBar extends SafeBossBar<BossBar> {
 
     @Override
     public void show(@NotNull BossBarInfo bar) {
+        // Apply current values, the BossBar might have been updated while frozen without the changes being applied
+        updateTitle(bar);
+        updateProgress(bar);
+        updateColor(bar);
+        updateStyle(bar);
         ((Audience)player.getPlayer()).showBossBar(bar.getBossBar());
     }
 

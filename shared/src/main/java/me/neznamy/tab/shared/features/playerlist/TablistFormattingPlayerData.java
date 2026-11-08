@@ -20,4 +20,10 @@ public class TablistFormattingPlayerData {
 
     /** Flag tracking whether this feature is disabled for the player with condition or not */
     public final AtomicBoolean disabled = new AtomicBoolean();
+
+    /**
+     * Time ({@link System#currentTimeMillis()}) of player's last join, server switch or vanish status change.
+     * Delayed display name updates for missing tablist entries are only scheduled shortly after it.
+     */
+    public volatile long lastEntryChange = System.currentTimeMillis();
 }

@@ -31,7 +31,8 @@ public class MineSkin extends SkinSource {
             String signature = (String) texture.get("signature");
             TAB.getInstance().debug("Downloaded MINESKIN skin " + input + " in " + (System.currentTimeMillis()-time) + "ms");
             return new Skin(value, signature);
-        } catch (IOException | ParseException e) {
+        } catch (IOException | ParseException | RuntimeException e) {
+            // RuntimeException covers unexpected response format (such as missing fields)
             TAB.getInstance().getErrorManager().mineSkinDownloadError(input, e);
         }
         return null;

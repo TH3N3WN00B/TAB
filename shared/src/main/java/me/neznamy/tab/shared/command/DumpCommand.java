@@ -45,7 +45,14 @@ public class DumpCommand extends SubCommand {
                 sendMessage(sender, getMessages().getPlayerNotFound(args[0]));
                 return;
             }
-            new Thread(() -> dump(sender, analyzed)).start();
+            new Thread(() -> {
+                try {
+                    dump(sender, analyzed);
+                } catch (Throwable t) {
+                    sendMessage(sender, "&cAn error occurred while creating the dump, check console for more info.");
+                    TAB.getInstance().getErrorManager().criticalError("Failed to create dump", t);
+                }
+            }).start();
         } else {
             sendMessage(sender, "&cUsage: /tab dump <player>");
         }
@@ -140,21 +147,49 @@ public class DumpCommand extends SubCommand {
         return files;
     }
 
+    /**
+     * Censors sensitive values in the config. Keys are matched case-insensitively,
+     * because the config is read that way as well.
+     *
+     * @param   config
+     *          Copy of config.yml content to censor
+     */
     @SuppressWarnings("unchecked")
     private void censorConfig(@NotNull Map<Object, Object> config) {
-        Map<String, Object> mysql = (Map<String, Object>) config.get("mysql");
-        mysql.put("host", "*CENSORED*");
-        mysql.put("database", "*CENSORED*");
-        mysql.put("username", "*CENSORED*");
-        mysql.put("password", "*CENSORED*");
-        Map<String, Object> proxySupport = (Map<String, Object>) config.get("proxy-support");
-        Map<String, Object> redis = (Map<String, Object>) proxySupport.get("redis");
-        if (redis != null) {
-            redis.put("url", "*CENSORED*");
+        for (Map.Entry<Object, Object> entry : config.entrySet()) {
+            if (!(entry.getValue() instanceof Map)) continue;
+            String key = String.valueOf(entry.getKey());
+            if (key.equalsIgnoreCase("mysql")) {
+                censor((Map<Object, Object>) entry.getValue(), "host", "database", "username", "password");
+            } else if (key.equalsIgnoreCase("proxy-support")) {
+                for (Map.Entry<Object, Object> proxyEntry : ((Map<Object, Object>) entry.getValue()).entrySet()) {
+                    if (!(proxyEntry.getValue() instanceof Map)) continue;
+                    String proxyKey = String.valueOf(proxyEntry.getKey());
+                    if (proxyKey.equalsIgnoreCase("redis") || proxyKey.equalsIgnoreCase("rabbitmq")) {
+                        censor((Map<Object, Object>) proxyEntry.getValue(), "url", "password");
+                    }
+                }
+            }
         }
-        Map<String, Object> rabbitmq = (Map<String, Object>) proxySupport.get("rabbitmq");
-        if (rabbitmq != null) {
-            rabbitmq.put("url", "*CENSORED*");
+    }
+
+    /**
+     * Replaces values of all keys matching any of the given keys (ignoring case) with a placeholder.
+     *
+     * @param   map
+     *          Map to censor values in
+     * @param   keys
+     *          Keys to censor
+     */
+    private void censor(@NotNull Map<Object, Object> map, @NotNull String... keys) {
+        for (Map.Entry<Object, Object> entry : map.entrySet()) {
+            String key = String.valueOf(entry.getKey());
+            for (String censoredKey : keys) {
+                if (key.equalsIgnoreCase(censoredKey)) {
+                    entry.setValue("*CENSORED*");
+                    break;
+                }
+            }
         }
     }
 

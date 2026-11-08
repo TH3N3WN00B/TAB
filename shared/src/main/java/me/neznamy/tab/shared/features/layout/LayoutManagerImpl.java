@@ -1,5 +1,6 @@
 package me.neznamy.tab.shared.features.layout;
 
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +10,7 @@ import me.neznamy.tab.shared.Property;
 import me.neznamy.tab.shared.ProtocolVersion;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.TabConstants;
+import me.neznamy.tab.shared.cpu.TimedCaughtTask;
 import me.neznamy.tab.shared.features.layout.LayoutConfiguration.LayoutDefinition;
 import me.neznamy.tab.shared.features.layout.impl.FakeEntryLayout;
 import me.neznamy.tab.shared.features.layout.impl.LayoutBase;
@@ -23,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Getter
 public class LayoutManagerImpl extends RefreshableFeature implements LayoutManager, JoinListener, QuitListener, VanishListener, Loadable,
@@ -39,6 +42,10 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
     private PlayerList playerList;
     private PingSpoof pingSpoof;
     @Getter private static boolean teamsEnabled;
+
+    /** Whether a tick of all layouts is already scheduled in the processing thread */
+    @Getter(AccessLevel.NONE)
+    private final AtomicBoolean tickScheduled = new AtomicBoolean();
 
     /**
      * Constructs new instance.
@@ -182,6 +189,18 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
         }
     }
 
+    /**
+     * Schedules {@link #tickAllLayouts()} in the processing thread, unless it is already scheduled.
+     * This merges ticks requested for many players refreshed in the same batch into a single tick.
+     */
+    public void scheduleTickAllLayouts() {
+        if (!tickScheduled.compareAndSet(false, true)) return;
+        TAB.getInstance().getCpu().getProcessingThread().execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            tickScheduled.set(false);
+            tickAllLayouts();
+        }, getFeatureName(), "Updating player groups"));
+    }
+
     // ------------------
     // API Implementation
     // ------------------
@@ -210,8 +229,12 @@ public class LayoutManagerImpl extends RefreshableFeature implements LayoutManag
         ensureActive();
         TabPlayer p = (TabPlayer) player;
         p.ensureLoaded();
-        p.layoutData.forcedLayout = (LayoutPattern) layout;
-        refresh(p, false);
+        // Process in the thread where layouts are handled to avoid concurrent modification of layout data
+        TAB.getInstance().getCpu().getProcessingThread().execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!p.isOnline()) return; // Player disconnected in the meantime
+            p.layoutData.forcedLayout = (LayoutPattern) layout;
+            refresh(p, false);
+        }, getFeatureName(), "Sending layout"));
     }
 
     @Override

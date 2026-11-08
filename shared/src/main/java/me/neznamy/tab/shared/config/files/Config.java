@@ -66,7 +66,7 @@ public class Config {
     private final boolean onlineUuidInTabList = config.getBoolean("use-online-uuid-in-tablist", true);
     private final boolean pipelineInjection = getSecretOption("pipeline-injection", true);
     @NotNull private final String serverName = getSecretOption("server-name", "N/A");
-    private final int permissionRefreshInterval = config.getInt("permission-refresh-interval", 1000);
+    private final int permissionRefreshInterval = loadPermissionRefreshInterval();
     private final boolean packetEventsCompensation = config.getBoolean("compensate-for-packetevents-bug", false) && !TAB.getInstance().getPlatform().isSafeFromPacketEventsBug();
 
     /** If enabled, groups are assigned via permissions instead of permission plugin */
@@ -134,6 +134,22 @@ public class Config {
                         "Disable global playerlist for the same result, but with better performance.");
             }
         }
+    }
+
+    /**
+     * Loads permission refresh interval from config and validates it. The value must be a positive
+     * number divisible by 50, otherwise a warning is printed and default value of 1000 is used.
+     *
+     * @return  Configured permission refresh interval or {@code 1000} if invalid
+     */
+    private int loadPermissionRefreshInterval() {
+        int interval = config.getInt("permission-refresh-interval", 1000);
+        if (interval <= 0 || interval % 50 != 0) {
+            TAB.getInstance().getConfigHelper().startup().startupWarn(config.getFile(), "Permission refresh interval (permission-refresh-interval) is set to "
+                    + interval + ", but it must be a positive number divisible by 50. Using default value 1000.");
+            return 1000;
+        }
+        return interval;
     }
 
     /**

@@ -64,13 +64,13 @@ public final class FandEventListener implements EventListener<Player> {
             return;
         }
         player.updateVanishState(event.vanished());
-        TAB.getInstance().getFeatureManager().onVanishStatusChange(player);
+        TAB.getInstance().getCPUManager().runTask(() -> TAB.getInstance().getFeatureManager().onVanishStatusChange(player));
     }
 
     private void disguiseStateChange(UUID playerId) {
         FandTabPlayer player = player(playerId);
         if (player != null) {
-            TAB.getInstance().getFeatureManager().onDisguiseStatusChange(player);
+            TAB.getInstance().getCPUManager().runTask(() -> TAB.getInstance().getFeatureManager().onDisguiseStatusChange(player));
         }
     }
 

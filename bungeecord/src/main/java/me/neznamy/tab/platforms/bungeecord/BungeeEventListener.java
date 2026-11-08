@@ -3,6 +3,8 @@ package me.neznamy.tab.platforms.bungeecord;
 import me.neznamy.tab.shared.ProtocolVersion;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.TabConstants;
+import me.neznamy.tab.shared.cpu.CpuManager;
+import me.neznamy.tab.shared.cpu.TimedCaughtTask;
 import me.neznamy.tab.shared.data.Server;
 import me.neznamy.tab.shared.platform.EventListener;
 import me.neznamy.tab.shared.platform.TabPlayer;
@@ -11,6 +13,7 @@ import me.neznamy.tab.shared.platform.decorators.SafeScoreboard;
 import net.md_5.bungee.api.connection.ProxiedPlayer;
 import net.md_5.bungee.api.event.PlayerDisconnectEvent;
 import net.md_5.bungee.api.event.PluginMessageEvent;
+import net.md_5.bungee.api.event.ServerConnectedEvent;
 import net.md_5.bungee.api.event.ServerSwitchEvent;
 import net.md_5.bungee.api.plugin.Listener;
 import net.md_5.bungee.event.EventHandler;
@@ -73,6 +76,32 @@ public class BungeeEventListener implements EventListener<ProxiedPlayer>, Listen
                 }
             }
         });
+    }
+
+    /**
+     * Unfreezes scoreboard and boss bars of 1.20.2+ players frozen in {@link #onSwitch(ServerSwitchEvent)}
+     * when pipeline injection is disabled, since otherwise it is done when Login packet is sent,
+     * which can only be detected with pipeline injection. For 1.20.2+ this event is called
+     * right before the Login packet is sent to the player.
+     *
+     * @param   e
+     *          Server connected event
+     */
+    @EventHandler
+    public void onConnected(ServerConnectedEvent e) {
+        TAB tab = TAB.getInstance();
+        if (tab.isPluginDisabled()) return;
+        if (tab.getFeatureManager().isFeatureEnabled(TabConstants.Feature.PIPELINE_INJECTION)) return; // Handled on Login packet
+        CpuManager cpu = tab.getCPUManager();
+        cpu.getProcessingThread().executeLater(new TimedCaughtTask(cpu, () -> {
+            TabPlayer player = tab.getPlayer(e.getPlayer().getUniqueId());
+            if (player == null || player.getVersionId() < ProtocolVersion.V1_20_2.getNetworkId()) return;
+            ((SafeScoreboard<?>)player.getScoreboard()).setFrozen(false);
+            player.getScoreboard().resend();
+            // For 1.20.2+ we need to do this, because server switch event is called before tablist is cleared
+            tab.getFeatureManager().onTabListClear(player);
+            ((SafeBossBar<?>)player.getBossBar()).unfreezeAndResend();
+        }, "Server connect", TabConstants.CpuUsageCategory.PACKET_LOGIN), 200);
     }
 
     /**

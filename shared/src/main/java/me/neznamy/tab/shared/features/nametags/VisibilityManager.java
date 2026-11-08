@@ -58,18 +58,11 @@ public class VisibilityManager extends RefreshableFeature implements JoinListene
 
     @Override
     public void load() {
+        // Pure function without side effects. Both inputs are encoded in the value, so a change of either one
+        // triggers refresh, which then applies the result in this feature's thread.
         TAB.getInstance().getPlaceholderManager().registerPlayerPlaceholder(TabConstants.Placeholder.INVISIBLE, p -> {
             TabPlayer player = (TabPlayer) p;
-            boolean newInvisibility = invisibleCondition.isMet((TabPlayer) p);
-            if (newInvisibility) {
-                player.teamData.hideNametag(NameTagInvisibilityReason.MEETING_CONFIGURED_CONDITION);
-            } else {
-                player.teamData.showNametag(NameTagInvisibilityReason.MEETING_CONFIGURED_CONDITION);
-            }
-            if (player.hasInvisibilityPotion()) {
-                newInvisibility = true;
-            }
-            return Boolean.toString(newInvisibility);
+            return invisibleCondition.isMet(player) + "," + player.hasInvisibilityPotion();
         });
         addUsedPlaceholder(TabConstants.Placeholder.INVISIBLE);
         for (TabPlayer all : nameTags.getOnlinePlayers().getPlayers()) {
@@ -96,8 +89,13 @@ public class VisibilityManager extends RefreshableFeature implements JoinListene
 
     @Override
     public void refresh(@NotNull TabPlayer p, boolean force) {
-        if (p.teamData.isDisabled()) return;
         if (!nameTags.getOnlinePlayers().contains(p)) return; // player is not loaded by this feature yet
+        if (invisibleCondition.isMet(p)) {
+            p.teamData.hideNametag(NameTagInvisibilityReason.MEETING_CONFIGURED_CONDITION);
+        } else {
+            p.teamData.showNametag(NameTagInvisibilityReason.MEETING_CONFIGURED_CONDITION);
+        }
+        if (p.teamData.isDisabled()) return;
         updateVisibility(p);
     }
 
@@ -283,7 +281,10 @@ public class VisibilityManager extends RefreshableFeature implements JoinListene
             if (!hasOpaqueNameTagMode(player) || player.teamData.isDisabled()) continue;
             for (TabPlayer viewer : nameTags.getOnlinePlayers().getPlayers()) {
                 if (!isOpaqueNameTagMode(player, viewer) || viewer == player || !viewer.isOnline() || !player.isOnline()) {
-                    immediateResults.add(new OpaqueVisibilityResult(player, viewer, true));
+                    // Only needs a result if the nametag is currently hidden because of occlusion, otherwise nothing to do
+                    if (player.teamData.hasHiddenNametag(viewer, NameTagInvisibilityReason.OPAQUE_OCCLUSION)) {
+                        immediateResults.add(new OpaqueVisibilityResult(player, viewer, true));
+                    }
                 } else if (!canSeeForOpaque(viewer, player)) {
                     immediateResults.add(new OpaqueVisibilityResult(player, viewer, false));
                 } else {

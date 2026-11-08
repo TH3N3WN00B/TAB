@@ -45,6 +45,12 @@ public class FoliaPlatform extends BukkitPlatform {
     /** FoliaGlobalRegionScheduler#execute(Plugin, Runnable) method */
     private final Method globalScheduler_execute;
 
+    /** Entity#getScheduler() method */
+    private final Method entity_getScheduler;
+
+    /** EntityScheduler#run(Plugin, Consumer, Runnable) method */
+    private final Method entityScheduler_run;
+
     /** Location overload avoids accessing a target entity from the viewer's region. */
     private final Method hasLineOfSightLocation;
 
@@ -62,6 +68,8 @@ public class FoliaPlatform extends BukkitPlatform {
         super(plugin);
         globalScheduler = Bukkit.class.getMethod("getGlobalRegionScheduler").invoke(null);
         globalScheduler_execute = globalScheduler.getClass().getMethod("execute", Plugin.class, Runnable.class);
+        entity_getScheduler = Entity.class.getMethod("getScheduler");
+        entityScheduler_run = entity_getScheduler.getReturnType().getMethod("run", Plugin.class, Consumer.class, Runnable.class);
         hasLineOfSightLocation = Player.class.getMethod("hasLineOfSight", Location.class);
     }
 
@@ -163,13 +171,11 @@ public class FoliaPlatform extends BukkitPlatform {
      */
     @Override
     @SneakyThrows
-    @SuppressWarnings("JavaReflectionMemberAccess")
     public void runSync(@NotNull Entity entity, @NotNull Runnable task) {
         if (!getPlugin().isEnabled()) return; // Server shutdown, no one cares anymore, everyone is about to be kicked
-        Object entityScheduler = Entity.class.getMethod("getScheduler").invoke(entity);
+        Object entityScheduler = entity_getScheduler.invoke(entity);
         Consumer<?> consumer = $ -> task.run(); // Reflection and lambdas don't go together
-        entityScheduler.getClass().getMethod("run", Plugin.class, Consumer.class, Runnable.class)
-                .invoke(entityScheduler, getPlugin(), consumer, null);
+        entityScheduler_run.invoke(entityScheduler, getPlugin(), consumer, null);
     }
 
     /**
@@ -260,10 +266,9 @@ public class FoliaPlatform extends BukkitPlatform {
             return;
         }
         try {
-            Object scheduler = Entity.class.getMethod("getScheduler").invoke(player);
+            Object scheduler = entity_getScheduler.invoke(player);
             Consumer<?> consumer = ignored -> task.run();
-            Object scheduled = scheduler.getClass().getMethod("run", Plugin.class, Consumer.class, Runnable.class)
-                    .invoke(scheduler, getPlugin(), consumer, retired);
+            Object scheduled = entityScheduler_run.invoke(scheduler, getPlugin(), consumer, retired);
             if (scheduled == null) retired.run();
         } catch (ReflectiveOperationException | RuntimeException e) {
             retired.run();

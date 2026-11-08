@@ -89,17 +89,28 @@ public class Configs {
                     "of the plugin, consider reporting them.");
         }
         if (config.getMysql() != null) {
+            MySQL connection = null;
             try {
                 //Avoid "No suitable driver found" error
                 Class.forName("com.mysql.cj.jdbc.Driver");
 
-                mysql = new MySQL(config.getMysql());
-                mysql.openConnection();
-                groups = new MySQLGroupConfiguration(mysql);
-                users = new MySQLUserConfiguration(mysql);
+                connection = new MySQL(config.getMysql());
+                connection.openConnection();
+                groups = new MySQLGroupConfiguration(connection);
+                users = new MySQLUserConfiguration(connection);
+                // Only mark MySQL as active once everything succeeded
+                mysql = connection;
                 return;
             } catch (SQLException | ClassNotFoundException e) {
                 TAB.getInstance().getErrorManager().mysqlConnectionFailed(e);
+            } finally {
+                if (mysql == null && connection != null) {
+                    try {
+                        connection.closeConnection();
+                    } catch (SQLException ignored) {
+                        // Connection is broken anyway
+                    }
+                }
             }
         }
         groups = groupsFile;

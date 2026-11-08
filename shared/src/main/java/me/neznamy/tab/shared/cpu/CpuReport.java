@@ -37,7 +37,8 @@ public class CpuReport {
      */
     public CpuReport(int updateRateSeconds, @NotNull Map<String, Map<String, AtomicLong>> features, @NotNull Map<String, AtomicLong> placeholders) {
         long TIME_PERCENT = TimeUnit.SECONDS.toNanos(1) / updateRateSeconds;
-        TreeMap<Long, Map.Entry<String, Map<String, Float>>> sorted = new TreeMap<>((o1, o2) -> Long.compare(o2, o1));
+        // List instead of a map keyed by usage, so features with equal usage are not lost
+        List<Map.Entry<Long, Map.Entry<String, Map<String, Float>>>> sorted = new ArrayList<>(features.size());
         features.forEach((key, val) -> {
             Map<String, Float> percent = new LinkedHashMap<>(val.size());
             long sum = val.entrySet().stream()
@@ -45,9 +46,10 @@ public class CpuReport {
                     .peek(e -> percent.put(e.getKey(), (float) e.getValue().get() / TIME_PERCENT))
                     .mapToLong(e -> e.getValue().get())
                     .sum();
-            sorted.put(sum, new AbstractMap.SimpleImmutableEntry<>(key, percent));
+            sorted.add(new AbstractMap.SimpleImmutableEntry<>(sum, new AbstractMap.SimpleImmutableEntry<>(key, percent)));
         });
-        featureUsage = sorted.values().stream().collect(() -> new LinkedHashMap<>(features.size()),
+        sorted.sort((o1, o2) -> Long.compare(o2.getKey(), o1.getKey()));
+        featureUsage = sorted.stream().map(Map.Entry::getValue).collect(() -> new LinkedHashMap<>(features.size()),
                 (m, e) -> m.put(e.getKey(), e.getValue()), Map::putAll);
 
         // No, it's not empty

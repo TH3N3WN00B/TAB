@@ -6,6 +6,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -15,14 +16,14 @@ import java.util.regex.PatternSyntaxException;
 @Getter
 public class DataManager {
 
-    /** Map of all servers, indexed by their name */
-    private final Map<String, Server> servers = new HashMap<>();
+    /** Map of all servers, indexed by their name, accessed from multiple threads */
+    private final Map<String, Server> servers = new ConcurrentHashMap<>();
 
     /** Map of all server groups defined in global playerlist configuration */
     private final Map<String, ServerGroup> serverGroups = new HashMap<>();
 
-    /** Map of all worlds, indexed by their name */
-    private final Map<String, World> worlds = new HashMap<>();
+    /** Map of all worlds, indexed by their name, accessed from multiple threads */
+    private final Map<String, World> worlds = new ConcurrentHashMap<>();
 
     /** Global playerlist configuration, null if not loaded yet or feature is disabled */
     @Nullable

@@ -49,8 +49,9 @@ public abstract class ProxyPlatform implements Platform {
             ((ProxyTabPlayer)all).sendPluginMessage(new RegisterPlaceholder(placeholder.getIdentifier(), refresh));
             Map<String, String> bridgePlaceholders = ((ProxyTabPlayer)all).getPlaceholders();
             // TODO do relational placeholders as well
-            if (placeholder instanceof PlayerPlaceholderImpl && bridgePlaceholders.containsKey(identifier)) {
-                ((PlayerPlaceholderImpl)placeholder).updateValue(all, bridgePlaceholders.get(identifier));
+            String value = bridgePlaceholders.get(identifier); // Single lookup, map may be cleared concurrently on server switch
+            if (placeholder instanceof PlayerPlaceholderImpl && value != null) {
+                ((PlayerPlaceholderImpl)placeholder).updateValue(all, value);
             }
         }
     }

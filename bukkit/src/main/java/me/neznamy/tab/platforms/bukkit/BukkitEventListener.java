@@ -31,6 +31,8 @@ public class BukkitEventListener implements EventListener<Player>, Listener {
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onQuit(PlayerQuitEvent e) {
+        // Remove tracker directly, quit is not processed by features while TAB is disabled, which would leak it
+        TAB.getInstance().getTablistTrackers().remove(e.getPlayer().getUniqueId());
         quit(e.getPlayer().getUniqueId());
     }
 

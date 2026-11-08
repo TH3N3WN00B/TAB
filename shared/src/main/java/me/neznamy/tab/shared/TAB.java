@@ -33,6 +33,7 @@ import org.yaml.snakeyaml.error.YAMLException;
 
 import java.io.File;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -236,7 +237,7 @@ public class TAB extends TabAPI {
         if (pluginDisabled) return;
         try {
             long time = System.currentTimeMillis();
-            if (configuration.getMysql() != null) configuration.getMysql().closeConnection();
+            // MySQL connection is closed in kill() after pending MySQL tasks are finished
             featureManager.unload();
             platform.logInfo(new TabTextComponent("Disabled in " + (System.currentTimeMillis()-time) + "ms", TabTextColor.GREEN));
         } catch (Throwable e) {
@@ -246,7 +247,8 @@ public class TAB extends TabAPI {
     }
 
     /**
-     * Clears online player maps and arrays and cancels all tasks
+     * Clears online player maps and arrays, cancels all tasks
+     * and closes MySQL connection if it is open.
      */
     private void kill() {
         pluginDisabled = true;
@@ -254,7 +256,15 @@ public class TAB extends TabAPI {
         playersByName.clear();
         playersByTabListId.clear();
         onlinePlayers = new TabPlayer[0];
+        // Shuts down MySQL thread as well, letting pending writes finish before the connection is closed
         cpu.cancelAllTasks();
+        if (configuration != null && configuration.getMysql() != null) {
+            try {
+                configuration.getMysql().closeConnection();
+            } catch (SQLException e) {
+                errorManager.printError("Failed to close MySQL connection", e);
+            }
+        }
     }
 
     /**
@@ -295,7 +305,10 @@ public class TAB extends TabAPI {
         playersByName.remove(player.getName());
         playersByTabListId.remove(player.getTablistId());
         onlinePlayers = data.values().toArray(new TabPlayer[0]);
-        tablistTrackers.remove(player.getUniqueId()); // Player left, it is safe to remove their tracker
+        // Player left, it is safe to remove their tracker. Only remove the tracker belonging to this player instance,
+        // so that a quit processed late (asynchronously) does not remove the tracker of a new connection after a quick rejoin.
+        TabListEntryTracker tracker = player.getTabListEntryTracker();
+        if (tracker != null) tablistTrackers.remove(player.getUniqueId(), tracker);
     }
 
     /**

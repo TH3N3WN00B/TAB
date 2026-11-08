@@ -195,11 +195,15 @@ public class HeaderFooter extends RefreshableFeature implements HeaderFooterMana
                  put(design.getName(), design.dump(player, player.headerFooterData.activeDesign));
             }
         }});
-        if (player.headerFooterData.activeDesign != null) {
+        HeaderFooterDesign activeDesign = player.headerFooterData.activeDesign;
+        if (activeDesign != null) {
+            // Properties are not created for the design if header/footer is forced via API
+            Property headerProperty = player.headerFooterData.headerProperties.get(activeDesign);
+            Property footerProperty = player.headerFooterData.footerProperties.get(activeDesign);
             map.put("currently displayed design", new LinkedHashMap<String, Object>() {{
-                put("name", player.headerFooterData.activeDesign.getName());
-                put("header", player.headerFooterData.headerProperties.get(player.headerFooterData.activeDesign).get().split("\n"));
-                put("footer", player.headerFooterData.footerProperties.get(player.headerFooterData.activeDesign).get().split("\n"));
+                put("name", activeDesign.getName());
+                put("header", headerProperty == null ? null : headerProperty.get().split("\n"));
+                put("footer", footerProperty == null ? null : footerProperty.get().split("\n"));
             }});
         } else {
             map.put("currently displayed design", null);

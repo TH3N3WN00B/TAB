@@ -122,7 +122,7 @@ public record FabricPlatform(MinecraftServer server) implements BackendPlatform 
 
     @Override
     public void registerCommand() {
-        FabricTAB.COMMAND_DISPATCHER.getRoot().addChild(new FabricTabCommand(getCommand()).getCommand());
+        FabricTAB.registerCommand(new FabricTabCommand(getCommand()).getCommand());
     }
 
     @Override
@@ -253,7 +253,7 @@ public record FabricPlatform(MinecraftServer server) implements BackendPlatform 
                 return 0;
             }
         };
-        FabricTAB.COMMAND_DISPATCHER.getRoot().addChild(command.getCommand());
+        FabricTAB.registerCommand(command.getCommand());
     }
 
     @Override

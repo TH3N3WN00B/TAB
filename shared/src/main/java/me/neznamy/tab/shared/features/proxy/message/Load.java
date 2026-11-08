@@ -55,7 +55,8 @@ public class Load extends ProxyMessage {
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
         for (PlayerJoin join : decodedPlayers) {
-            join.process(proxySupport);
+            join.setSourceProxy(getSourceProxy());
+            join.process(proxySupport, false);
         }
     }
 }

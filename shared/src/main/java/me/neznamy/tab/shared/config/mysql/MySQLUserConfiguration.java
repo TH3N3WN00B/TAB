@@ -1,7 +1,6 @@
 package me.neznamy.tab.shared.config.mysql;
 
 import lombok.NonNull;
-import lombok.SneakyThrows;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.config.PropertyConfiguration;
 import me.neznamy.tab.shared.data.Server;
@@ -13,32 +12,75 @@ import org.jetbrains.annotations.Nullable;
 import javax.sql.rowset.CachedRowSet;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MySQLUserConfiguration implements PropertyConfiguration {
 
     private final MySQL mysql;
 
-    private final WeakHashMap<TabPlayer, Map<String, Object>> values = new WeakHashMap<>();
-    private final Map<World, WeakHashMap<TabPlayer, Map<String, Object>>> perWorld = new HashMap<>();
-    private final Map<Server, WeakHashMap<TabPlayer, Map<String, Object>>> perServer = new HashMap<>();
+    private final Map<TabPlayer, Map<String, Object>> values = Collections.synchronizedMap(new WeakHashMap<>());
+    private final Map<World, Map<TabPlayer, Map<String, Object>>> perWorld = new ConcurrentHashMap<>();
+    private final Map<Server, Map<TabPlayer, Map<String, Object>>> perServer = new ConcurrentHashMap<>();
 
     public MySQLUserConfiguration(@NonNull MySQL mysql) throws SQLException {
         this.mysql = mysql;
         mysql.execute("create table if not exists tab_users (`user` varchar(64), `property` varchar(16), `value` varchar(1024), world varchar(64), server varchar(64))");
     }
 
+    /**
+     * Inserts a row directly into the database without updating values in memory.
+     * User name is converted to lowercase. This is intended to be used inside a transaction,
+     * followed by {@link #reload()}.
+     *
+     * @param   user
+     *          User name or UUID
+     * @param   property
+     *          Property name
+     * @param   world
+     *          World name or {@code null} for global value
+     * @param   server
+     *          Server name or {@code null} for global value
+     * @param   value
+     *          Property value
+     * @throws  SQLException
+     *          If the query fails
+     */
+    public void insert(@NonNull String user, @NonNull String property, @Nullable String world, @Nullable String server, @NonNull String value) throws SQLException {
+        mysql.execute("insert into `tab_users` (`user`, `property`, `value`, `world`, `server`) values (?, ?, ?, ?, ?)",
+                user.toLowerCase(), property, value, world, server);
+    }
+
+    /**
+     * Clears all user data in memory and loads it again from the database for all online players.
+     */
+    public void reload() {
+        values.clear();
+        perWorld.clear();
+        perServer.clear();
+        for (TabPlayer player : TAB.getInstance().getOnlinePlayers()) {
+            load(player);
+        }
+    }
+
     @Override
-    @SneakyThrows
     public void setProperty(@NonNull String user, @NonNull String property, @Nullable Server server, @Nullable World world, @Nullable String value) {
         TabPlayer p = getPlayer(user);
         String lowercaseUser = user.toLowerCase();
-        if (getProperty(lowercaseUser, property, server, world) != null) {
-            mysql.execute("delete from `tab_users` where `user` = ? and `property` = ? and world " + querySymbol(world == null) + " ? and server " + querySymbol(server == null) + " ?",
-                    lowercaseUser, property, world == null ? null : world.getName(), server == null ? null : server.getName());
-        }
+        String worldName = world == null ? null : world.getName();
+        String serverName = server == null ? null : server.getName();
         if (p != null) setProperty0(p, property, server, world, value);
-        if (value != null) mysql.execute("insert into `tab_users` (`user`, `property`, `value`, `world`, `server`) values (?, ?, ?, ?, ?)",
-                lowercaseUser, property, value, world == null ? null : world.getName(), server == null ? null : server.getName());
+        TAB.getInstance().getCPUManager().getMysqlThread().execute(() -> {
+            try {
+                mysql.executeInTransaction(() -> {
+                    mysql.execute("delete from `tab_users` where `user` = ? and `property` = ? and world " + querySymbol(worldName == null) + " ? and server " + querySymbol(serverName == null) + " ?",
+                            lowercaseUser, property, worldName, serverName);
+                    if (value != null) mysql.execute("insert into `tab_users` (`user`, `property`, `value`, `world`, `server`) values (?, ?, ?, ?, ?)",
+                            lowercaseUser, property, value, worldName, serverName);
+                });
+            } catch (SQLException e) {
+                TAB.getInstance().getErrorManager().mysqlQueryFailed(e);
+            }
+        });
     }
 
     private String querySymbol(boolean isNull) {
@@ -46,26 +88,39 @@ public class MySQLUserConfiguration implements PropertyConfiguration {
     }
 
     private void setProperty0(@NonNull TabPlayer user, @NonNull String property, @Nullable Server server, @Nullable World world, @Nullable String value) {
+        Map<String, Object> properties;
         if (world != null) {
-            perWorld.computeIfAbsent(world, w -> new WeakHashMap<>()).computeIfAbsent(user, g -> new HashMap<>()).put(property, value);
+            properties = perWorld.computeIfAbsent(world, w -> Collections.synchronizedMap(new WeakHashMap<>())).computeIfAbsent(user, g -> new ConcurrentHashMap<>());
         } else if (server != null) {
-            perServer.computeIfAbsent(server, s -> new WeakHashMap<>()).computeIfAbsent(user, g -> new HashMap<>()).put(property, value);
+            properties = perServer.computeIfAbsent(server, s -> Collections.synchronizedMap(new WeakHashMap<>())).computeIfAbsent(user, g -> new ConcurrentHashMap<>());
         } else {
-            values.computeIfAbsent(user, g -> new HashMap<>()).put(property, value);
+            properties = values.computeIfAbsent(user, g -> new ConcurrentHashMap<>());
         }
+        if (value == null) {
+            properties.remove(property);
+        } else {
+            properties.put(property, value);
+        }
+    }
+
+    @Nullable
+    private Object getValue(@Nullable Map<TabPlayer, Map<String, Object>> map, @Nullable TabPlayer player, @NonNull String property) {
+        if (map == null || player == null) return null;
+        Map<String, Object> properties = map.get(player);
+        return properties == null ? null : properties.get(property);
     }
 
     @Override
     public String[] getProperty(@NonNull String user, @NonNull String property, @Nullable Server server, @Nullable World world) {
         TabPlayer p = getPlayer(user);
         Object value;
-        if ((value = perWorld.getOrDefault(world, new WeakHashMap<>()).getOrDefault(p, new HashMap<>()).get(property)) != null) {
+        if (world != null && (value = getValue(perWorld.get(world), p, property)) != null) {
             return new String[] {toString(value), String.format("user=%s,world=%s", user, world.getName())};
         }
-        if ((value = perServer.getOrDefault(server, new WeakHashMap<>()).getOrDefault(p, new HashMap<>()).get(property)) != null) {
+        if (server != null && (value = getValue(perServer.get(server), p, property)) != null) {
             return new String[] {toString(value), String.format("user=%s,server=%s", user, server.getName())};
         }
-        if ((value = values.getOrDefault(p, new HashMap<>()).get(property)) != null) {
+        if ((value = getValue(values, p, property)) != null) {
             return new String[] {toString(value), String.format("user=%s", user)};
         }
         return new String[0];
@@ -73,18 +128,21 @@ public class MySQLUserConfiguration implements PropertyConfiguration {
 
     @Override
     public void remove(@NonNull String player) {
-        try {
-            mysql.execute("delete from `tab_users` where `user` = ?", player);
-        } catch (SQLException e) {
-            TAB.getInstance().getErrorManager().mysqlQueryFailed(e);
-        }
+        String lowercaseUser = player.toLowerCase();
+        TAB.getInstance().getCPUManager().getMysqlThread().execute(() -> {
+            try {
+                mysql.execute("delete from `tab_users` where `user` = ?", lowercaseUser);
+            } catch (SQLException e) {
+                TAB.getInstance().getErrorManager().mysqlQueryFailed(e);
+            }
+        });
         TabPlayer user = getPlayer(player);
         if (user == null) return;
         values.remove(user);
-        for (WeakHashMap<TabPlayer, Map<String, Object>> worldValues : perWorld.values()) {
+        for (Map<TabPlayer, Map<String, Object>> worldValues : perWorld.values()) {
             worldValues.remove(user);
         }
-        for (WeakHashMap<TabPlayer, Map<String, Object>> serverValues : perServer.values()) {
+        for (Map<TabPlayer, Map<String, Object>> serverValues : perServer.values()) {
             serverValues.remove(user);
         }
     }
@@ -138,6 +196,7 @@ public class MySQLUserConfiguration implements PropertyConfiguration {
                     String world = crs.getString("world");
                     String server = crs.getString("server");
                     TAB.getInstance().debug("Loaded user line: " + String.format("%s, %s, %s, %s, %s", user, property, value, world, server));
+                    if (user == null || property == null) continue;
                     checkProperty("MySQL", "player", user, property, server, world, false);
                     setProperty0(player, property, Server.byName(server), World.byName(world), value);
                 }
@@ -149,6 +208,7 @@ public class MySQLUserConfiguration implements PropertyConfiguration {
                     String world = crs2.getString("world");
                     String server = crs2.getString("server");
                     TAB.getInstance().debug("Loaded user line: " + String.format("%s, %s, %s, %s, %s", user, property, value, world, server));
+                    if (user == null || property == null) continue;
                     checkProperty("MySQL", "player", user, property, server, world, false);
                     setProperty0(player, property, Server.byName(server), World.byName(world), value);
                 }

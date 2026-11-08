@@ -43,7 +43,8 @@ public class PlayerSkin extends SkinSource {
             return new Skin(value, signature);
         } catch (FileNotFoundException e) {
             TAB.getInstance().getConfigHelper().runtime().unknownPlayerSkin(input);
-        } catch (IOException | ParseException e) {
+        } catch (IOException | ParseException | RuntimeException e) {
+            // RuntimeException covers unexpected response format (such as missing fields)
             TAB.getInstance().getErrorManager().playerSkinDownloadError(input, e);
         }
         return null;

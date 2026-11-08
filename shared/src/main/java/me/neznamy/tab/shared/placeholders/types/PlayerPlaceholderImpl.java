@@ -4,8 +4,6 @@ import lombok.NonNull;
 import me.neznamy.tab.api.placeholder.PlayerPlaceholder;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.TabConstants;
-import me.neznamy.tab.shared.cpu.TimedCaughtTask;
-import me.neznamy.tab.shared.features.types.CustomThreaded;
 import me.neznamy.tab.shared.features.types.RefreshableFeature;
 import me.neznamy.tab.shared.placeholders.PlaceholderIdentifier;
 import me.neznamy.tab.shared.platform.TabPlayer;
@@ -53,13 +51,7 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
         if (hasValueChanged((TabPlayer) player, returnedValue, true)) {
             if (!player.isLoaded()) return; // Updated on join
             for (RefreshableFeature r : reference.getUsedByFeatures()) {
-                TimedCaughtTask task = new TimedCaughtTask(TAB.getInstance().getCpu(), () -> r.refresh((TabPlayer) player, false),
-                        r.getFeatureName(), r.getRefreshDisplayName());
-                if (r instanceof CustomThreaded) {
-                    ((CustomThreaded) r).getCustomThread().execute(task);
-                } else {
-                    task.run();
-                }
+                refreshFeature(r, (TabPlayer) player, false);
             }
         }
     }
@@ -83,13 +75,7 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
         }
         if (!player.isLoaded()) return;
         for (RefreshableFeature r : features) {
-            TimedCaughtTask task = new TimedCaughtTask(TAB.getInstance().getCpu(), () -> r.refresh(player, false),
-                    r.getFeatureName(), r.getRefreshDisplayName());
-            if (r instanceof CustomThreaded) {
-                ((CustomThreaded) r).getCustomThread().execute(task);
-            } else {
-                task.run();
-            }
+            refreshFeature(r, player, false);
         }
     }
 
@@ -124,30 +110,34 @@ public class PlayerPlaceholderImpl extends TabPlaceholder implements PlayerPlace
     }
 
     @NotNull
-    public synchronized String getLastValue(@Nullable TabPlayer p) {
-        if (p == null) return identifier;
-        String value = p.lastPlaceholderEvaluatedValues.get(this);
-        if (value != null) return value;
+    public String getLastValue(@Nullable TabPlayer p) {
+        if (p == null) return identifier; // No need to lock (avoids taking this lock while holding placeholder manager's lock)
+        synchronized (this) {
+            String value = p.lastPlaceholderEvaluatedValues.get(this);
+            if (value != null) return value;
 
-        // Value not present, initialize
-        p.lastPlaceholderReturnedValues.put(this, identifier);
-        p.lastPlaceholderEvaluatedValues.put(this, replacements.findReplacement(identifier));
-        hasValueChanged(p, request(p), false);
-        return p.lastPlaceholderEvaluatedValues.get(this);
+            // Value not present, initialize
+            p.lastPlaceholderReturnedValues.put(this, identifier);
+            p.lastPlaceholderEvaluatedValues.put(this, replacements.findReplacement(identifier));
+            hasValueChanged(p, request(p), false);
+            return p.lastPlaceholderEvaluatedValues.get(this);
+        }
     }
 
     @Override
     @NotNull
-    public synchronized String getLastReturnedValue(@Nullable TabPlayer player) {
-        if (player == null) return identifier;
-        String value = player.lastPlaceholderReturnedValues.get(this);
-        if (value != null) return value;
+    public String getLastReturnedValue(@Nullable TabPlayer player) {
+        if (player == null) return identifier; // No need to lock (avoids taking this lock while holding placeholder manager's lock)
+        synchronized (this) {
+            String value = player.lastPlaceholderReturnedValues.get(this);
+            if (value != null) return value;
 
-        // Value not present, initialize
-        player.lastPlaceholderReturnedValues.put(this, identifier);
-        player.lastPlaceholderEvaluatedValues.put(this, replacements.findReplacement(identifier));
-        hasValueChanged(player, request(player), false);
-        return player.lastPlaceholderReturnedValues.get(this);
+            // Value not present, initialize
+            player.lastPlaceholderReturnedValues.put(this, identifier);
+            player.lastPlaceholderEvaluatedValues.put(this, replacements.findReplacement(identifier));
+            hasValueChanged(player, request(player), false);
+            return player.lastPlaceholderReturnedValues.get(this);
+        }
     }
 
     @Override

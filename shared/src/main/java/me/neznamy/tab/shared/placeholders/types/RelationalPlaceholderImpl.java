@@ -5,8 +5,6 @@ import me.neznamy.tab.api.placeholder.RelationalPlaceholder;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.TabConstants;
 import me.neznamy.tab.shared.chat.EnumChatFormat;
-import me.neznamy.tab.shared.cpu.TimedCaughtTask;
-import me.neznamy.tab.shared.features.types.CustomThreaded;
 import me.neznamy.tab.shared.features.types.RefreshableFeature;
 import me.neznamy.tab.shared.placeholders.PlaceholderIdentifier;
 import me.neznamy.tab.shared.platform.TabPlayer;
@@ -14,7 +12,9 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.function.BiFunction;
 
@@ -54,13 +54,7 @@ public class RelationalPlaceholderImpl extends TabPlaceholder implements Relatio
     public void updateValue(@NonNull me.neznamy.tab.api.TabPlayer viewer, @NonNull me.neznamy.tab.api.TabPlayer target, @Nullable String value) {
         if (hasValueChanged((TabPlayer) viewer, (TabPlayer) target, value)) {
             for (RefreshableFeature r : reference.getUsedByFeatures()) {
-                TimedCaughtTask task = new TimedCaughtTask(TAB.getInstance().getCpu(), () -> r.refresh((TabPlayer) target, true),
-                        r.getFeatureName(), r.getRefreshDisplayName());
-                if (r instanceof CustomThreaded) {
-                    ((CustomThreaded) r).getCustomThread().execute(task);
-                } else {
-                    task.run();
-                }
+                refreshFeature(r, (TabPlayer) target, true);
             }
         }
     }
@@ -78,8 +72,9 @@ public class RelationalPlaceholderImpl extends TabPlaceholder implements Relatio
      */
     public boolean hasValueChanged(@NonNull TabPlayer viewer, @NonNull TabPlayer target, @Nullable String value) {
         if (value == null) return false; //bridge placeholders, they are updated using updateValue method
+        if (value.equals(ERROR_VALUE)) return false; // Keep last known value
         String newValue = replacements.findReplacement(value);
-        Map<TabPlayer, String> viewerMap = viewer.lastRelationalValues.computeIfAbsent(this, v -> Collections.synchronizedMap(new WeakHashMap<>()));
+        Map<TabPlayer, String> viewerMap = getViewerMap(viewer);
         if (!viewerMap.getOrDefault(target, identifier).equals(newValue)) {
             viewerMap.put(target, newValue);
             updateParents(viewer);
@@ -91,22 +86,63 @@ public class RelationalPlaceholderImpl extends TabPlaceholder implements Relatio
 
     @Override
     public void updateFromNested(@NonNull TabPlayer target) {
-        for (TabPlayer viewer : TAB.getInstance().getOnlinePlayers()) {
-            String value = request(viewer, target);
-            String s = replacements.findReplacement(String.valueOf(value));
-            viewer.lastRelationalValues.computeIfAbsent(this, v -> Collections.synchronizedMap(new WeakHashMap<>())).put(target, s);
+        Set<TabPlayer> changedTargets = new HashSet<>();
+        for (TabPlayer other : TAB.getInstance().getOnlinePlayers()) {
+            // Every viewer -> this player
+            String value = request(other, target);
+            if (value != null && !value.equals(ERROR_VALUE)) { // Keep last known value
+                getViewerMap(other).put(target, replacements.findReplacement(value));
+            }
+
+            // This player as viewer -> every other player (nested value may be used for the viewer, such as %viewer:...% in conditions)
+            if (other == target) continue;
+            String viewerValue = request(target, other);
+            if (viewerValue == null || viewerValue.equals(ERROR_VALUE)) continue; // Keep last known value
+            String newValue = replacements.findReplacement(viewerValue);
+            String previousValue = getViewerMap(target).put(other, newValue);
+            if (previousValue != null && !previousValue.equals(newValue)) {
+                changedTargets.add(other);
+            }
+        }
+        for (TabPlayer changedTarget : changedTargets) {
+            if (!changedTarget.isLoaded()) continue; // Updated on join
+            for (RefreshableFeature f : reference.getUsedByFeatures()) {
+                refreshFeature(f, changedTarget, true);
+            }
         }
         if (!target.isLoaded()) return; // Updated on join
         for (RefreshableFeature f : reference.getUsedByFeatures()) {
-            TimedCaughtTask task = new TimedCaughtTask(TAB.getInstance().getCpu(), () -> f.refresh(target, true),
-                    f.getFeatureName(), f.getRefreshDisplayName());
-            if (f instanceof CustomThreaded) {
-                ((CustomThreaded) f).getCustomThread().execute(task);
-            } else {
-                task.run();
-            }
+            refreshFeature(f, target, true);
         }
         updateParents(target);
+    }
+
+    /**
+     * Returns map of last known values of this placeholder for given viewer, where key is the target.
+     * If not present, it is created.
+     *
+     * @param   viewer
+     *          Viewer to get values of
+     * @return  Map of last known values for given viewer
+     */
+    @NotNull
+    private Map<TabPlayer, String> getViewerMap(@NotNull TabPlayer viewer) {
+        return viewer.lastRelationalValues.computeIfAbsent(this, v -> Collections.synchronizedMap(new WeakHashMap<>()));
+    }
+
+    /**
+     * Relational placeholders can only be resolved for a viewer and target pair, which is done
+     * separately for each viewer. Returns the identifier unchanged, so it remains in the text and
+     * output replacements (such as "else") are not applied for all viewers at once.
+     *
+     * @param   player
+     *          player to parse placeholder for
+     * @return  identifier of this placeholder
+     */
+    @Override
+    @NotNull
+    public String parse(@Nullable TabPlayer player) {
+        return identifier;
     }
 
     /**
@@ -122,8 +158,7 @@ public class RelationalPlaceholderImpl extends TabPlaceholder implements Relatio
     public String getLastValue(@NonNull TabPlayer viewer, @NonNull TabPlayer target) {
         return setPlaceholders(
                 EnumChatFormat.color(
-                        viewer.lastRelationalValues.computeIfAbsent(this, v -> Collections.synchronizedMap(new WeakHashMap<>()))
-                                .computeIfAbsent(target, t -> retrieveValue(viewer, target))
+                        getViewerMap(viewer).computeIfAbsent(target, t -> retrieveValue(viewer, target))
                 ),
                 target
         );
@@ -132,7 +167,7 @@ public class RelationalPlaceholderImpl extends TabPlaceholder implements Relatio
     @NotNull
     private String retrieveValue(@NotNull TabPlayer viewer, @NotNull TabPlayer target) {
         String output = request(viewer, target);
-        if (output == null) output = identifier;
+        if (output == null || output.equals(ERROR_VALUE)) output = identifier;
         return evaluate(output, target);
     }
 

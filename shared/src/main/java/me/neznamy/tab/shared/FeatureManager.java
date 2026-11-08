@@ -163,7 +163,7 @@ public class FeatureManager {
             }
         }
         TAB.getInstance().removePlayer(disconnectedPlayer);
-        removeforcedDisplayName(disconnectedPlayer.getTablistId());
+        removeforcedDisplayName(disconnectedPlayer.getTablistId(), null);
         TAB.getInstance().debug("Player quit of " + disconnectedPlayer.getName() + " processed in " + (System.currentTimeMillis()-millis) + "ms");
 
         ProxySupport proxy = getFeature(TabConstants.Feature.PROXY_SUPPORT);
@@ -175,14 +175,27 @@ public class FeatureManager {
         }
     }
 
-    private void removeforcedDisplayName(@NotNull UUID id) {
+    /**
+     * Removes forced display name and blocked spectator status of given tablist entry from all players,
+     * unless another player using the same tablist entry is connected.
+     *
+     * @param   id
+     *          Tablist UUID of the disconnected player
+     * @param   disconnectedProxyPlayer
+     *          Proxy player who disconnected (still present in proxy player map), {@code null} for local players
+     */
+    private void removeforcedDisplayName(@NotNull UUID id, @Nullable ProxyPlayer disconnectedProxyPlayer) {
         ProxySupport proxy = getFeature(TabConstants.Feature.PROXY_SUPPORT);
         if (proxy != null) {
-            ProxyPlayer proxyPlayer = proxy.getProxyPlayers().get(id);
-            if (proxyPlayer != null) return; // Proxy player is already connected, do not remove anymore
+            // Proxy players are mapped by real UUID, but this is a tablist UUID, compare it directly
+            for (ProxyPlayer proxyPlayer : proxy.getProxyPlayers().values()) {
+                if (proxyPlayer != disconnectedProxyPlayer && proxyPlayer.getTablistId().equals(id)) {
+                    return; // Proxy player is already connected, do not remove anymore
+                }
+            }
         }
 
-        if (TAB.getInstance().getPlayer(id) != null) return; // Real player connected in the meantime, do not remove anymore
+        if (TAB.getInstance().isPlayerConnected(id)) return; // Real player connected in the meantime, do not remove anymore
 
         // Player is actually not online anymore, remove to avoid memory leak
         for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
@@ -474,7 +487,7 @@ public class FeatureManager {
                 task.run();
             }
         }
-        removeforcedDisplayName(disconnectedPlayer.getTablistId());
+        removeforcedDisplayName(disconnectedPlayer.getTablistId(), disconnectedPlayer);
     }
 
     /**
@@ -521,7 +534,7 @@ public class FeatureManager {
      * @param   featureName
      *          Name of the feature it was previously registered with.
      */
-    public void unregisterFeature(@NotNull String featureName) {
+    public synchronized void unregisterFeature(@NotNull String featureName) {
         features.remove(featureName);
         values = features.values().toArray(new TabFeature[0]);
     }

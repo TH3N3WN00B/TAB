@@ -55,6 +55,7 @@ public class NameTagProxyHandler implements ProxyFeature {
         if (player.getNametag() == null) return; // Player not loaded yet
         if (player.getNametag().isDisabled()) return;
         for (TabPlayer viewer : feature.getOnlinePlayers().getPlayers()) {
+            viewer.teamData.unregisterTeam(player); // In case the viewer already registered it on join, avoid duplicate
             viewer.teamData.registerTeam(
                     player,
                     player.getNametag().getResolvedTeamName(),

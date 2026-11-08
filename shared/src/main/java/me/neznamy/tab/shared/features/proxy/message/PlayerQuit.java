@@ -37,6 +37,7 @@ public class PlayerQuit extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
+        proxySupport.purgeExpiredQueuedData();
         ProxyPlayer target = proxySupport.getProxyPlayers().get(playerId);
         if (target == null) {
             // This will not actually properly handle it, let's hope no one will ever run into this
@@ -44,7 +45,13 @@ public class PlayerQuit extends ProxyMessage {
             proxySupport.getQueuedData().remove(playerId);
             return;
         }
+        if (!ProxySupport.isSameProxy(target.getProxyId(), getSourceProxy())) {
+            // Player already joined another proxy, whose join was processed before this quit
+            TAB.getInstance().debug("[Proxy Support] Ignoring disconnect of proxy player " + target.getName() + " from proxy " +
+                    getSourceProxy() + ", because the player is connected to proxy " + target.getProxyId());
+            return;
+        }
         TAB.getInstance().getFeatureManager().onQuit(target);
-        proxySupport.getProxyPlayers().remove(target.getUniqueId());
+        proxySupport.getProxyPlayers().remove(target.getUniqueId(), target);
     }
 }

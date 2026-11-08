@@ -69,16 +69,18 @@ public class PlayerListObjectiveProxyPlayerData extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
-        ProxyPlayer target = proxySupport.getProxyPlayers().get(playerId);
+        // Data from a proxy the player is not connected to is queued and applied only if that proxy sends join
+        ProxyPlayer target = proxySupport.getProxyPlayer(playerId, this);
         if (target == null) {
             unknownPlayer(playerId.toString(), "playerlist objective update");
             QueuedData data = proxySupport.getQueuedData().computeIfAbsent(playerId, k -> new QueuedData());
-            if (data.getPlayerlist() == null || data.getPlayerlist().id < id) {
+            // IDs are only comparable between messages from the same proxy
+            if (data.getPlayerlist() == null || !data.getPlayerlist().isFromSameProxy(this) || data.getPlayerlist().id < id) {
                 data.setPlayerlist(this);
             }
             return;
         }
-        if (target.getPlayerlist() != null && target.getPlayerlist().id > id) {
+        if (target.getPlayerlist() != null && target.getPlayerlist().isFromSameProxy(this) && target.getPlayerlist().id > id) {
             TAB.getInstance().debug("Dropping playerlist objective update action for player " + target.getName() + " due to newer action already being present");
             return;
         }

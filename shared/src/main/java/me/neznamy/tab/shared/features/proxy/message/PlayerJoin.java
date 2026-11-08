@@ -75,20 +75,56 @@ public class PlayerJoin extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
-        ProxyPlayer decodedPlayer = new ProxyPlayer(uniqueId, tablistId, name, server, vanished, staff, skin);
-        if (proxySupport.getProxyPlayers().containsKey(decodedPlayer.getUniqueId())) {
-            TAB.getInstance().debug("[Proxy Support] The proxy player " + decodedPlayer.getName() + " is already connected, cannot process join.");
-            return;
+        process(proxySupport, true);
+    }
+
+    /**
+     * Processes this join message.
+     *
+     * @param   proxySupport
+     *          Proxy support feature
+     * @param   replace
+     *          {@code true} if this is a live join which should replace a player connected to a different
+     *          proxy (previous proxy did not send quit yet or crashed), {@code false} if this join is a
+     *          part of a {@link Load} snapshot, which should not override newer joins
+     */
+    public void process(@NotNull ProxySupport proxySupport, boolean replace) {
+        ProxyPlayer existing = proxySupport.getProxyPlayers().get(uniqueId);
+        if (existing != null) {
+            if (!replace || ProxySupport.isSameProxy(existing.getProxyId(), getSourceProxy())) {
+                TAB.getInstance().debug("[Proxy Support] The proxy player " + name + " is already connected, cannot process join.");
+                return;
+            }
+            TAB.getInstance().debug("[Proxy Support] The proxy player " + name + " joined proxy " + getSourceProxy() +
+                    " while still being registered as connected to proxy " + existing.getProxyId() + ", replacing old entry.");
+            TAB.getInstance().getFeatureManager().onQuit(existing);
+            proxySupport.getProxyPlayers().remove(uniqueId, existing);
         }
+        ProxyPlayer decodedPlayer = new ProxyPlayer(uniqueId, tablistId, name, server, vanished, staff, skin);
+        decodedPlayer.setProxyId(getSourceProxy());
         proxySupport.getProxyPlayers().put(decodedPlayer.getUniqueId(), decodedPlayer);
         QueuedData data = proxySupport.getQueuedData().remove(decodedPlayer.getUniqueId());
         if (data != null) {
-            decodedPlayer.setBelowname(data.getBelowname());
-            decodedPlayer.setTabFormat(data.getTabFormat());
-            decodedPlayer.setNametag(data.getNametag());
-            decodedPlayer.setPlayerlist(data.getPlayerlist());
-            decodedPlayer.setVanished(data.isVanished());
+            // Only apply data sent by the same proxy, data from other proxies belongs to a different session
+            if (data.getBelowname() != null && data.getBelowname().isFromSameProxy(this)) {
+                decodedPlayer.setBelowname(data.getBelowname());
+            }
+            if (data.getTabFormat() != null && data.getTabFormat().isFromSameProxy(this)) {
+                decodedPlayer.setTabFormat(data.getTabFormat());
+            }
+            if (data.getNametag() != null && data.getNametag().isFromSameProxy(this)) {
+                decodedPlayer.setNametag(data.getNametag());
+            }
+            if (data.getPlayerlist() != null && data.getPlayerlist().isFromSameProxy(this)) {
+                decodedPlayer.setPlayerlist(data.getPlayerlist());
+            }
+            if (data.getVanished() != null && ProxySupport.isSameProxy(data.getVanishedProxy(), getSourceProxy())) {
+                decodedPlayer.setVanished(data.getVanished());
+            }
+            // Queued server is not applied, join message carries the current server and a queued value
+            // may come from a previous session of the player on the same proxy
         }
+        proxySupport.purgeExpiredQueuedData();
         if (TAB.getInstance().getPlayer(decodedPlayer.getUniqueId()) == null) {
             TAB.getInstance().getFeatureManager().onJoin(decodedPlayer);
         }

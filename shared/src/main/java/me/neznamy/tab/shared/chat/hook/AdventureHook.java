@@ -85,7 +85,7 @@ public class AdventureHook {
         }
         if (component instanceof TabObjectComponent) {
             if (OBJECT_COMPONENTS_AVAILABLE) {
-                return AdventureObjectHook.convert((TabObjectComponent) component);
+                return AdventureObjectHook.convert((TabObjectComponent) component).style(style.build()).children(list);
             } else {
                 return Component.text("<Object components are not supported in your version of Adventure library>");
             }

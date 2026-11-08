@@ -26,12 +26,16 @@ public class ModernConverter {
      */
     public ModernConverter() {
         converters.put(0, config -> {
-            Map<String, Object> components = new LinkedHashMap<>();
-            components.put("minimessage-support", true);
-            components.put("disable-shadow-for-heads", true);
-            config.set("components", components);
+            // Only add missing options, do not overwrite existing ones (config-version may just be missing)
+            config.setIfMissing("components.minimessage-support", true);
+            config.setIfMissing("components.disable-shadow-for-heads", true);
         });
         converters.put(1, config -> {
+            // Only convert if header-footer is in the old format, otherwise it would be overwritten by defaults
+            ConfigurationSection oldHeaderFooter = config.getConfigurationSection("header-footer");
+            if (oldHeaderFooter.getObject("designs") != null) return;
+            if (!hasAnyKey(oldHeaderFooter, "header", "footer", "disable-condition", "per-world", "per-server")) return;
+
             // Warn users
             TAB.getInstance().getPlatform().logWarn(new TabTextComponent("Please note that header/footer conversion may not be 100% accurate and will not convert" +
                     " per-group settings and per-user settings." +
@@ -116,28 +120,53 @@ public class ModernConverter {
             config.removeOption("scoreboard.use-numbers");
             config.removeOption("scoreboard.static-number");
         });
-        converters.put(3, config -> config.set("proxy-support.channel-name-suffix", "custom"));
+        converters.put(3, config -> config.setIfMissing("proxy-support.channel-name-suffix", "custom"));
         converters.put(4, config -> {
             ConfigurationSection layout = config.getConfigurationSection("layout");
             ConfigurationSection layouts = layout.getConfigurationSection("layouts");
             for (Object layoutName : layouts.getKeys()) {
                 ConfigurationSection singleLayout = layouts.getConfigurationSection(layoutName.toString());
-                singleLayout.put("display-condition", singleLayout.getString("condition"));
-                singleLayout.remove("condition");
+                // Only convert old "condition" key if present, otherwise the new "display-condition" would be removed
+                if (hasAnyKey(singleLayout, "condition")) {
+                    singleLayout.put("display-condition", singleLayout.getString("condition"));
+                    singleLayout.remove("condition");
+                }
                 ConfigurationSection groups = singleLayout.getConfigurationSection("groups");
                 for (Object groupName : groups.getKeys()) {
                     ConfigurationSection singleGroup = groups.getConfigurationSection(groupName.toString());
-                    singleGroup.put("display-condition", singleGroup.getString("condition"));
-                    singleGroup.remove("condition");
+                    if (hasAnyKey(singleGroup, "condition")) {
+                        singleGroup.put("display-condition", singleGroup.getString("condition"));
+                        singleGroup.remove("condition");
+                    }
                 }
             }
         });
         converters.put(5, config -> {
-            config.getConfigurationSection("placeholders").put("locale", "en-US");
+            ConfigurationSection placeholders = config.getConfigurationSection("placeholders");
+            if (!hasAnyKey(placeholders, "locale")) placeholders.put("locale", "en-US");
         });
         converters.put(6, config -> {
-            config.getConfigurationSection("belowname-objective").put("view-distance", 10);
+            ConfigurationSection belowname = config.getConfigurationSection("belowname-objective");
+            if (!hasAnyKey(belowname, "view-distance")) belowname.put("view-distance", 10);
         });
+    }
+
+    /**
+     * Returns {@code true} if given section contains at least one of the given keys (ignoring case).
+     *
+     * @param   section
+     *          Section to check
+     * @param   keys
+     *          Keys to look for
+     * @return  {@code true} if at least one key is present, {@code false} if not
+     */
+    private boolean hasAnyKey(@NonNull ConfigurationSection section, @NonNull String... keys) {
+        for (Object sectionKey : section.getKeys()) {
+            for (String key : keys) {
+                if (key.equalsIgnoreCase(String.valueOf(sectionKey))) return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -118,6 +118,8 @@ public class CollisionManager extends RefreshableFeature implements JoinListener
             p.ensureLoaded();
             if (Objects.equals(p.teamData.forcedCollision, collision)) return;
             p.teamData.forcedCollision = collision;
+            // Collision rule is not tracked while forced, recalculate it to not send an outdated value
+            if (collision == null) p.teamData.collisionRule = collision(p);
             updateCollision(p);
         }, getFeatureName(), "Processing API call (setCollisionRule)"));
     }

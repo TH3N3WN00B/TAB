@@ -41,11 +41,13 @@ public class UpdateVanishStatus extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
-        ProxyPlayer target = proxySupport.getProxyPlayers().get(playerId);
+        // Vanish status from a proxy the player is not connected to is queued and applied only if that proxy sends join
+        ProxyPlayer target = proxySupport.getProxyPlayer(playerId, this);
         if (target == null) {
             unknownPlayer(playerId.toString(), "vanish status update");
             QueuedData data = proxySupport.getQueuedData().computeIfAbsent(playerId, k -> new QueuedData());
             data.setVanished(vanished);
+            data.setVanishedProxy(getSourceProxy());
             return;
         }
         target.setVanished(vanished);

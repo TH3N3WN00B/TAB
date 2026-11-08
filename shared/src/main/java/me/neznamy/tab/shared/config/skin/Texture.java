@@ -28,9 +28,8 @@ public class Texture extends SkinSource {
     @Override
     @Nullable
     public Skin download(@NotNull String texture) {
-        try {
-            long time = System.currentTimeMillis();
-            InputStreamReader reader = getInputStreamReader(texture);
+        long time = System.currentTimeMillis();
+        try (InputStreamReader reader = getInputStreamReader(texture)) {
             JSONObject json = (JSONObject) new JSONParser().parse(reader);
             JSONObject data = (JSONObject) json.get("data");
             JSONObject texture2 = (JSONObject) data.get("texture");
@@ -38,7 +37,8 @@ public class Texture extends SkinSource {
             String signature = (String) texture2.get("signature");
             TAB.getInstance().debug("Downloaded TEXTURE skin " + texture + " in " + (System.currentTimeMillis()-time) + "ms");
             return new Skin(value, signature);
-        } catch (IOException | ParseException e) {
+        } catch (IOException | ParseException | RuntimeException e) {
+            // RuntimeException covers unexpected response format (such as missing fields)
             TAB.getInstance().getErrorManager().textureSkinDownloadError(texture, e);
             return null;
         }
@@ -48,6 +48,8 @@ public class Texture extends SkinSource {
     private static InputStreamReader getInputStreamReader(@NotNull String texture) throws IOException {
         URL url = new URL("https://api.mineskin.org/generate/url/");
         HttpURLConnection con = (HttpURLConnection) url.openConnection();
+        con.setConnectTimeout(CONNECT_TIMEOUT);
+        con.setReadTimeout(READ_TIMEOUT);
         con.setRequestProperty("User-Agent", "ExampleApp/v1.0");
         con.setRequestProperty("Content-Type", "application/json");
         con.setRequestMethod("POST");
@@ -57,6 +59,6 @@ public class Texture extends SkinSource {
             byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
             os.write(input, 0, input.length);
         }
-        return new InputStreamReader(con.getInputStream());
+        return new InputStreamReader(con.getInputStream(), StandardCharsets.UTF_8);
     }
 }

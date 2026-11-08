@@ -13,6 +13,7 @@ import me.neznamy.tab.shared.features.scoreboard.lines.ScoreboardLineHolder;
 import me.neznamy.tab.shared.features.types.Conditional;
 import me.neznamy.tab.shared.features.types.CustomThreaded;
 import me.neznamy.tab.shared.features.types.RefreshableFeature;
+import me.neznamy.tab.shared.features.types.TabFeature;
 import me.neznamy.tab.shared.placeholders.conditions.Condition;
 import me.neznamy.tab.shared.platform.Scoreboard;
 import me.neznamy.tab.shared.platform.TabPlayer;
@@ -30,6 +31,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @Getter
 public class ScoreboardImpl extends RefreshableFeature implements me.neznamy.tab.api.scoreboard.Scoreboard,
         CustomThreaded, Conditional {
+
+    /** Highest line number supported by {@link ScoreboardLineHolder} */
+    private static final int MAX_LINE_NUMBER = 99;
 
     //scoreboard manager
     private final ScoreboardManagerImpl manager;
@@ -92,7 +96,7 @@ public class ScoreboardImpl extends RefreshableFeature implements me.neznamy.tab
             if (line == null) line = "";
             ScoreboardLineHolder score = new ScoreboardLineHolder(this, line, i+1);
             lines.add(score);
-            TAB.getInstance().getFeatureManager().registerFeature(TabConstants.Feature.scoreboardLine(name, i), score);
+            TAB.getInstance().getFeatureManager().registerFeature(getLineFeatureName(score), score);
         }
     }
 
@@ -169,6 +173,77 @@ public class ScoreboardImpl extends RefreshableFeature implements me.neznamy.tab
         players.remove(player);
     }
 
+    /**
+     * Unregisters this scoreboard and all of its lines from feature manager.
+     * Called when this scoreboard is removed.
+     */
+    public void unregisterFeatures() {
+        for (Line line : lines) {
+            unregisterFeatureIfSame(getLineFeatureName((ScoreboardLineHolder) line), (ScoreboardLineHolder) line);
+            TAB.getInstance().getPlaceholderManager().removeUsedFeature((ScoreboardLineHolder) line);
+        }
+        if (!api) {
+            // Scoreboards from config are registered by the manager
+            unregisterFeatureIfSame(TabConstants.Feature.scoreboardLine(name), this);
+        }
+        TAB.getInstance().getPlaceholderManager().removeUsedFeature(this);
+    }
+
+    /**
+     * Unregisters feature with given name, but only if it is still the specified instance.
+     * This prevents removal of a feature registered under the same name by a newer scoreboard
+     * (such as when a scoreboard is removed and created again with the same name via API).
+     *
+     * @param   featureName
+     *          Name of the feature
+     * @param   feature
+     *          Expected feature instance
+     */
+    private void unregisterFeatureIfSame(@NotNull String featureName, @NotNull TabFeature feature) {
+        TabFeature registered = TAB.getInstance().getFeatureManager().getFeature(featureName);
+        if (registered == feature) {
+            TAB.getInstance().getFeatureManager().unregisterFeature(featureName);
+        }
+    }
+
+    /**
+     * Returns name under which specified line of this scoreboard is registered in feature manager.
+     *
+     * @param   line
+     *          Line to get feature name of
+     * @return  Feature name of the line
+     */
+    @NotNull
+    private String getLineFeatureName(@NotNull ScoreboardLineHolder line) {
+        return TabConstants.Feature.scoreboardLine(name, line.getLineNumber() - 1);
+    }
+
+    /**
+     * Returns line number for a new line added to the bottom of this scoreboard.
+     * Line numbers must be unique (they define team and score holder names), and increasing
+     * from top to bottom (score holder names resolve score ties), so the number after
+     * the last line's number is used. If it would exceed the supported maximum,
+     * all lines are re-created with numbers starting at 1 first.
+     *
+     * @return  Line number for a new line
+     */
+    private int nextLineNumber() {
+        if (lines.isEmpty()) return 1;
+        int lastNumber = ((ScoreboardLineHolder) lines.get(lines.size() - 1)).getLineNumber();
+        if (lastNumber < MAX_LINE_NUMBER || lines.size() >= MAX_LINE_NUMBER) return lastNumber + 1;
+        List<String> texts = new ArrayList<>();
+        for (Line line : lines) {
+            texts.add(line.getText());
+        }
+        for (int i = lines.size() - 1; i >= 0; i--) {
+            removeLine(i);
+        }
+        for (String text : texts) {
+            addLine(text);
+        }
+        return lines.size() + 1;
+    }
+
     @NotNull
     @Override
     public String getFeatureName() {
@@ -197,8 +272,8 @@ public class ScoreboardImpl extends RefreshableFeature implements me.neznamy.tab
     @Override
     public void addLine(@NonNull String text) {
         ensureActive();
-        ScoreboardLineHolder line = new ScoreboardLineHolder(this, text, lines.size()+1);
-        TAB.getInstance().getFeatureManager().registerFeature(TabConstants.Feature.scoreboardLine(name, lines.size()), line);
+        ScoreboardLineHolder line = new ScoreboardLineHolder(this, text, nextLineNumber());
+        TAB.getInstance().getFeatureManager().registerFeature(getLineFeatureName(line), line);
         lines.add(line);
         for (TabPlayer p : players) {
             line.register(p);
@@ -209,12 +284,13 @@ public class ScoreboardImpl extends RefreshableFeature implements me.neznamy.tab
     public void removeLine(int index) {
         ensureActive();
         if (index < 0 || index >= lines.size()) throw new IndexOutOfBoundsException("Index " + index + " is out of range (0 - " + (lines.size()-1) + ")");
-        ScoreboardLineHolder line = (ScoreboardLineHolder) lines.get(index);
-        lines.remove(line);
+        ScoreboardLineHolder line = (ScoreboardLineHolder) lines.remove(index);
         for (TabPlayer p : players) {
             line.unregister(p);
+            p.scoreboardData.lineProperties.remove(line); // Stop refreshing the removed line
         }
-        TAB.getInstance().getFeatureManager().unregisterFeature(TabConstants.Feature.scoreboardLine(name, index));
+        unregisterFeatureIfSame(getLineFeatureName(line), line);
+        TAB.getInstance().getPlaceholderManager().removeUsedFeature(line);
     }
 
     @Override

@@ -118,6 +118,8 @@ public class ScoreboardLineHolder extends RefreshableFeature implements Line, Cu
 
     @Override
     public void refresh(@NotNull TabPlayer refreshed, boolean force) {
+        // Line is not registered to the player (different scoreboard displayed or line was removed using API)
+        if (!refreshed.scoreboardData.lineProperties.containsKey(this)) return;
         handle.refresh(refreshed);
     }
 
@@ -189,7 +191,8 @@ public class ScoreboardLineHolder extends RefreshableFeature implements Line, Cu
                 score = -1;
             }
         } else {
-            score = parent.getLines().size() + 1 - lineNumber;
+            // Based on position, line numbers of lines added using API do not have to match their position
+            score = parent.getLines().size() - parent.getLines().indexOf(this);
         }
         player.getScoreboard().setScore(
                 ScoreboardManagerImpl.OBJECTIVE_NAME,

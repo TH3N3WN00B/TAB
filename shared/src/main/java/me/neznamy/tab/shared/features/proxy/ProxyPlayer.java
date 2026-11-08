@@ -71,6 +71,10 @@ public class ProxyPlayer {
     @NotNull
     private ConnectionState connectionState = ConnectionState.QUEUED;
 
+    /** UUID of the proxy the player is connected to (sender of the join message), {@code null} if unknown */
+    @Nullable
+    private String proxyId;
+
     /**
      * Constructs new instance with given parameters.
      *
@@ -104,11 +108,14 @@ public class ProxyPlayer {
     /**
      * Creates a new entry for this player to be used in tablist.
      *
+     * @param   gameMode
+     *          Game mode to display the player with
      * @return  TabList.Entry representing this player
      */
     @NotNull
-    public TabList.Entry asEntry() {
-        return new TabList.Entry(uniqueId, nickname, skin, true, 0, 0, tabFormat == null ? null : tabFormat.getFormatComponent(), 0, true);
+    public TabList.Entry asEntry(int gameMode) {
+        return new TabList.Entry(tablistId, nickname, skin, true, 0, gameMode,
+                tabFormat == null || tabFormat.isDisabled() ? null : tabFormat.getFormatComponent(), 0, true);
     }
 
     /**

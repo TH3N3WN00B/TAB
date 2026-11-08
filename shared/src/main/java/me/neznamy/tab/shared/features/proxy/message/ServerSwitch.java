@@ -42,11 +42,13 @@ public class ServerSwitch extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
-        ProxyPlayer target = proxySupport.getProxyPlayers().get(playerId);
+        // Server switch from a proxy the player is not connected to is queued and applied only if that proxy sends join
+        ProxyPlayer target = proxySupport.getProxyPlayer(playerId, this);
         if (target == null) {
             unknownPlayer(playerId.toString(), "server switch");
             QueuedData data = proxySupport.getQueuedData().computeIfAbsent(playerId, k -> new QueuedData());
             data.setServer(newServer);
+            data.setServerProxy(getSourceProxy());
             return;
         }
         target.setServer(newServer);

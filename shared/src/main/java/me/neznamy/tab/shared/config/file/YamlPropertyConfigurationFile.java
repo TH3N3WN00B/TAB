@@ -80,10 +80,12 @@ public class YamlPropertyConfigurationFile extends YamlConfigurationFile impleme
     @Override
     public void setProperty(@NonNull String name, @NonNull String property, @Nullable Server server, @Nullable World world, @Nullable String value) {
         ConfigurationSection target;
+        // Resolve world / server groups (such as "world1;world2") the same way as getProperty does,
+        // otherwise the value would be saved under a key that is never read
         if (world != null) {
-            target = getOrCreateSection(PER_WORLD, world.getName(), name);
+            target = getOrCreateSection(PER_WORLD, TAB.getInstance().getConfiguration().getGroup(worldGroups, world.getName()), name);
         } else if (server != null) {
-            target = getOrCreateSection(PER_SERVER, server.getName(), name);
+            target = getOrCreateSection(PER_SERVER, TAB.getInstance().getConfiguration().getServerGroup(serverGroups, server), name);
         } else {
             target = getOrCreateSection(name);
         }

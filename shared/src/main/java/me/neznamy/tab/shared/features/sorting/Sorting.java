@@ -159,7 +159,7 @@ public class Sorting extends RefreshableFeature implements SortingManager, JoinL
             boolean nameTaken = false;
             for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
                 if (all == p) continue;
-                if (potentialTeamName.equals(all.sortingData.shortTeamName)) {
+                if (potentialTeamName.equals(all.sortingData.shortTeamName) || potentialTeamName.equals(all.sortingData.forcedTeamName)) {
                     nameTaken = true;
                     break;
                 }

@@ -69,7 +69,8 @@ public class LayoutPattern extends RefreshableFeature implements Layout, Conditi
 
     @Override
     public void refresh(@NotNull TabPlayer refreshed, boolean force) {
-        manager.tickAllLayouts();
+        // Called for every refreshed player, tick all layouts only once for all of them
+        manager.scheduleTickAllLayouts();
     }
 
     @NotNull

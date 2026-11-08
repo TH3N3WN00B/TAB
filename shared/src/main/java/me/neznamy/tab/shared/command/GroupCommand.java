@@ -41,6 +41,10 @@ public class GroupCommand extends PropertyCommand {
             }
             return;
         }
+        if (isReservedName(args[0])) {
+            sendMessage(sender, "&c\"" + args[0] + "\" is a reserved name and cannot be used as a group name.");
+            return;
+        }
         if ("remove".equalsIgnoreCase(args[1])) {
             remove(sender, args[0]);
             return;
@@ -90,8 +94,6 @@ public class GroupCommand extends PropertyCommand {
         } else {
             sendMessage(sender, getMessages().getGroupValueRemoved(type, group));
         }
-        String[] property = TAB.getInstance().getConfiguration().getGroups().getProperty(group, type, server, world);
-        if (property.length > 0 && String.valueOf(value.isEmpty() ? null : value).equals(String.valueOf(property[0]))) return;
         TAB.getInstance().getConfiguration().getGroups().setProperty(group, type, server, world, value.isEmpty() ? null : value);
         for (TabPlayer pl : TAB.getInstance().getOnlinePlayers()) {
             if (pl.getGroup().equals(group) || TabConstants.DEFAULT_GROUP.equals(group)) {

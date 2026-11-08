@@ -26,6 +26,12 @@ import java.util.List;
 @Getter
 public class BukkitTabExpansion extends PlaceholderExpansion implements TabExpansion, Relational {
 
+    /** Maximum amount of passes of %tab_replace_% to prevent infinite loop if a value contains its own placeholder */
+    private static final int MAX_REPLACE_ITERATIONS = 10;
+
+    /** Maximum length of %tab_replace_% output */
+    private static final int MAX_REPLACE_LENGTH = 32767;
+
     /** List of all placeholders offered by the plugin for command suggestions */
     @NotNull
     private final List<String> placeholders = Collections.unmodifiableList(Arrays.asList(
@@ -82,14 +88,16 @@ public class BukkitTabExpansion extends PlaceholderExpansion implements TabExpan
         if (identifier.startsWith("replace_")) {
             String text = "%" + identifier.substring(8) + "%";
             String textBefore;
+            int iterations = 0;
             do {
                 textBefore = text;
                 for (String placeholder : PlaceholderManagerImpl.detectPlaceholders(text)) {
                     text = text.replace(placeholder, TAB.getInstance().getPlaceholderManager().findReplacement(placeholder,
                             PlaceholderAPI.setPlaceholders(player, placeholder)));
+                    if (text.length() > MAX_REPLACE_LENGTH) break;
                 }
-            } while (!textBefore.equals(text));
-            return text;
+            } while (!textBefore.equals(text) && ++iterations < MAX_REPLACE_ITERATIONS && text.length() <= MAX_REPLACE_LENGTH);
+            return cutReplaceOutput(text);
         }
         if (player == null) return "<Player cannot be null>";
         TabPlayer p = TAB.getInstance().getPlayer(player.getUniqueId());
@@ -108,14 +116,16 @@ public class BukkitTabExpansion extends PlaceholderExpansion implements TabExpan
         if (identifier.startsWith("replace_")) {
             String text = "%" + identifier.substring(8) + "%";
             String textBefore;
+            int iterations = 0;
             do {
                 textBefore = text;
                 for (String placeholder : PlaceholderManagerImpl.detectPlaceholders(text)) {
                     text = text.replace(placeholder, TAB.getInstance().getPlaceholderManager().findReplacement(placeholder,
                             PlaceholderAPI.setRelationalPlaceholders(viewer, target, placeholder)));
+                    if (text.length() > MAX_REPLACE_LENGTH) break;
                 }
-            } while (!textBefore.equals(text));
-            return text;
+            } while (!textBefore.equals(text) && ++iterations < MAX_REPLACE_ITERATIONS && text.length() <= MAX_REPLACE_LENGTH);
+            return cutReplaceOutput(text);
         }
         if (identifier.startsWith("placeholder_")) {
             String requestedPlaceholder = "%" + identifier.substring("placeholder_".length()) + "%";
@@ -133,6 +143,11 @@ public class BukkitTabExpansion extends PlaceholderExpansion implements TabExpan
             }
         }
         return "<Unknown identifier: \"" + identifier + "\">";
+    }
+
+    @NotNull
+    private String cutReplaceOutput(@NotNull String text) {
+        return text.length() > MAX_REPLACE_LENGTH ? text.substring(0, MAX_REPLACE_LENGTH) : text;
     }
 
     @Override

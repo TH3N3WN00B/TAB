@@ -62,9 +62,9 @@ public class NameTagPlayerData {
     @NotNull
     private final EnumSet<NameTagInvisibilityReason> nameTagInvisibilityReasons = EnumSet.noneOf(NameTagInvisibilityReason.class);
 
-    /** Reasons why player's nametag is hidden for specific players */
+    /** Reasons why player's nametag is hidden for specific players (synchronized, because API can read it from any thread) */
     @NotNull
-    private final Map<TabPlayer, EnumSet<NameTagInvisibilityReason>> nameTagInvisibilityReasonsRelational = new WeakHashMap<>();
+    private final Map<TabPlayer, EnumSet<NameTagInvisibilityReason>> nameTagInvisibilityReasonsRelational = Collections.synchronizedMap(new WeakHashMap<>());
 
     /** Teams registered to this player mapped as team owner to team name */
     private final Map<TabPlayer, String> registeredTeams = new HashMap<>();
@@ -158,7 +158,8 @@ public class NameTagPlayerData {
      * @return  Whether the state has changed as a result of this call
      */
     public boolean showNametag(@NotNull TabPlayer viewer, @NotNull NameTagInvisibilityReason reason) {
-        return nameTagInvisibilityReasonsRelational.computeIfAbsent(viewer, v -> EnumSet.noneOf(NameTagInvisibilityReason.class)).remove(reason);
+        EnumSet<NameTagInvisibilityReason> reasons = nameTagInvisibilityReasonsRelational.get(viewer);
+        return reasons != null && reasons.remove(reason);
     }
 
     /**
@@ -171,10 +172,8 @@ public class NameTagPlayerData {
      * @return  {@code true} if nametag is hidden for specified reason, {@code false} if not
      */
     public boolean hasHiddenNametag(@NotNull TabPlayer viewer, @NotNull NameTagInvisibilityReason reason) {
-        if (!nameTagInvisibilityReasonsRelational.containsKey(viewer)) {
-            return false;
-        }
-        return nameTagInvisibilityReasonsRelational.get(viewer).contains(reason);
+        EnumSet<NameTagInvisibilityReason> reasons = nameTagInvisibilityReasonsRelational.get(viewer);
+        return reasons != null && reasons.contains(reason);
     }
 
     /**
@@ -186,10 +185,8 @@ public class NameTagPlayerData {
      * @return  {@code true} if nametag should be hidden, {@code false} if not
      */
     public boolean hasHiddenNametag(@NotNull TabPlayer viewer) {
-        if (!nameTagInvisibilityReasonsRelational.containsKey(viewer)) {
-            return false;
-        }
-        return !nameTagInvisibilityReasonsRelational.get(viewer).isEmpty();
+        EnumSet<NameTagInvisibilityReason> reasons = nameTagInvisibilityReasonsRelational.get(viewer);
+        return reasons != null && !reasons.isEmpty();
     }
 
     /**

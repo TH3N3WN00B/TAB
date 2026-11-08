@@ -12,7 +12,11 @@ import org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer;
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Scoreboard implementation using direct NMS code.
@@ -21,12 +25,17 @@ public class NMSPacketScoreboard extends SafeScoreboard<BukkitTabPlayer> {
 
     private static final ScoreboardTeamBase.EnumNameTagVisibility[] visibilities = ScoreboardTeamBase.EnumNameTagVisibility.values();
     private static final Scoreboard dummyScoreboard = new Scoreboard();
-    private static final IScoreboardCriteria INTEGER = new ScoreboardBaseCriteria("dummy");
-    private static final IScoreboardCriteria HEARTS = new ScoreboardHealthCriteria("health");
+    // Reuse vanilla instances, creating new ones would replace them in the global criteria map
+    private static final IScoreboardCriteria INTEGER = IScoreboardCriteria.b; // dummy
+    private static final IScoreboardCriteria HEARTS = IScoreboardCriteria.g; // health
 
     private static final Field TeamPacket_NAME = ReflectionUtils.getFields(PacketPlayOutScoreboardTeam.class, String.class).get(0);
     private static final Field TeamPacket_ACTION = ReflectionUtils.getInstanceFields(PacketPlayOutScoreboardTeam.class, int.class).get(1);
     private static final Field TeamPacket_PLAYERS = ReflectionUtils.getOnlyField(PacketPlayOutScoreboardTeam.class, Collection.class);
+    private static final List<Field> TeamPacket_ALL_FIELDS = Arrays.stream(PacketPlayOutScoreboardTeam.class.getDeclaredFields())
+            .filter(field -> !Modifier.isStatic(field.getModifiers()) && field.getType() != Collection.class)
+            .map(ReflectionUtils::setAccessible)
+            .collect(Collectors.toList());
 
     private static final Field Objective_OBJECTIVE_NAME = ReflectionUtils.getFields(PacketPlayOutScoreboardObjective.class, String.class).get(0);
     private static final Field Objective_METHOD = ReflectionUtils.getOnlyField(PacketPlayOutScoreboardObjective.class, int.class);
@@ -136,8 +145,15 @@ public class NMSPacketScoreboard extends SafeScoreboard<BukkitTabPlayer> {
                 Collection<String> players = (Collection<String>) TeamPacket_PLAYERS.get(packet);
                 if (players != null) {
                     Collection<String> modified = onTeamPacket(action, (String) TeamPacket_NAME.get(packet), players);
-                    players.clear();
-                    players.addAll(modified);
+                    if (modified.size() != players.size()) {
+                        // Do not modify the original packet, the same instance may be sent to multiple players
+                        PacketPlayOutScoreboardTeam copy = new PacketPlayOutScoreboardTeam();
+                        for (Field field : TeamPacket_ALL_FIELDS) {
+                            field.set(copy, field.get(packet));
+                        }
+                        ((Collection<String>) TeamPacket_PLAYERS.get(copy)).addAll(modified); // Final field initialized by constructor
+                        return copy;
+                    }
                 }
             }
         }

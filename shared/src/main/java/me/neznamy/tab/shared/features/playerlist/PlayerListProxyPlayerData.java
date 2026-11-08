@@ -84,27 +84,29 @@ public class PlayerListProxyPlayerData extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
-        ProxyPlayer target = proxySupport.getProxyPlayers().get(playerId);
+        // Data from a proxy the player is not connected to is queued and applied only if that proxy sends join
+        ProxyPlayer target = proxySupport.getProxyPlayer(playerId, this);
         if (target == null) {
             unknownPlayer(playerId.toString(), "tablist format update");
             QueuedData data = proxySupport.getQueuedData().computeIfAbsent(playerId, k -> new QueuedData());
-            if (data.getTabFormat() == null || data.getTabFormat().id < id)  {
+            // IDs are only comparable between messages from the same proxy
+            if (data.getTabFormat() == null || !data.getTabFormat().isFromSameProxy(this) || data.getTabFormat().id < id)  {
                 data.setTabFormat(this);
             }
             return;
         }
-        if (target.getTabFormat() != null && target.getTabFormat().id > id) {
+        PlayerListProxyPlayerData oldData = target.getTabFormat();
+        if (oldData != null && oldData.isFromSameProxy(this) && oldData.id > id) {
             TAB.getInstance().debug("Dropping tabformat update action for player " + target.getName() + " due to newer action already being present");
             return;
         }
-        PlayerListProxyPlayerData oldData = target.getTabFormat();
 
         target.setTabFormat(this);
         if (target.getConnectionState() == ProxyPlayer.ConnectionState.CONNECTED) {
             if (disabled) {
-                if (!oldData.disabled) {
+                if (oldData != null && !oldData.disabled) {
                     for (TabPlayer viewer : TAB.getInstance().getOnlinePlayers()) {
-                        viewer.getTabList().updateDisplayName(target.getTablistId(), null);
+                        feature.updateDisplayName(viewer, target, null);
                     }
                 }
                 return;

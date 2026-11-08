@@ -31,18 +31,35 @@ public abstract class PropertyCommand extends SubCommand {
         sendMessage(sender, " - &9tagprefix&3/&9tagsuffix");
     }
 
+    /**
+     * Returns {@code true} if given name is reserved for per-world / per-server sections
+     * in groups.yml and users.yml and therefore cannot be used as a group or user name.
+     *
+     * @param   name
+     *          Name to check
+     * @return  {@code true} if name is reserved, {@code false} if not
+     */
+    protected boolean isReservedName(@NotNull String name) {
+        return name.equalsIgnoreCase("per-world") || name.equalsIgnoreCase("per-server");
+    }
+
     protected void trySaveEntity(@Nullable TabPlayer sender, @NotNull String[] args) {
-        String value = String.join(" ", Arrays.copyOfRange(args, 2, args.length));
+        // Read -w <world> and -s <server> flags from the end, in any order
+        int valueEnd = args.length;
         String world = null;
         String server = null;
-        if (args[args.length-2].equals("-w")) {
-            world = args[args.length-1];
-            value = value.startsWith("-w") ? "" : value.substring(0, value.length()-world.length()-4);
+        while (valueEnd >= 4) {
+            String flag = args[valueEnd-2];
+            if (world == null && flag.equals("-w")) {
+                world = args[valueEnd-1];
+            } else if (server == null && flag.equals("-s")) {
+                server = args[valueEnd-1];
+            } else {
+                break;
+            }
+            valueEnd -= 2;
         }
-        if (args[args.length-2].equals("-s")) {
-            server = args[args.length-1];
-            value = value.startsWith("-s") ? "" : value.substring(0, value.length()-server.length()-4);
-        }
+        String value = String.join(" ", Arrays.copyOfRange(args, 2, valueEnd));
         if (((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) && value.length() > 1) {
             value = value.substring(1, value.length()-1);
         }

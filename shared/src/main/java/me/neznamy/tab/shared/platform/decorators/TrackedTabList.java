@@ -27,6 +27,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Getter
 public abstract class TrackedTabList<P extends TabPlayer> implements TabList {
 
+    /**
+     * How long after a join, server switch or vanish status change of the viewer or target player
+     * a missing tablist entry is still expected to appear, so a delayed display name update is worth scheduling.
+     */
+    private static final long ENTRY_EXPECTED_WINDOW_MILLIS = 5000;
+
     /** Forced latency for all entries*/
     @Getter
     @Setter
@@ -91,7 +97,7 @@ public abstract class TrackedTabList<P extends TabPlayer> implements TabList {
         }
         if (containsEntry(target.getTablistId())) {
             updateDisplayName0(target.getTablistId(), displayName);
-        } else {
+        } else if (isEntryExpected(target)) {
             // Entry is not in tablist. This could be on join. Delay and try again.
             TAB.getInstance().getCpu().getTablistEntryCheckThread().executeLater(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
                 // If entry was added in the meantime and display name did not
@@ -99,6 +105,41 @@ public abstract class TrackedTabList<P extends TabPlayer> implements TabList {
                     updateDisplayName0(target.getTablistId(), displayName);
                 }
             }, TabConstants.Feature.PLAYER_LIST, "Delayed format update"), 500);
+        }
+        // Otherwise the entry is not expected to appear soon (for example the player is on a server this player cannot see),
+        // the expected display name is saved above and anti-override will apply it once the entry is added.
+    }
+
+    /**
+     * Returns {@code true} if entry of the target player, which is currently not in the tablist, may appear
+     * in it soon and a delayed retry is worth scheduling. This is the case when this player's server can see
+     * the target's server and one of them has joined, switched server or changed vanish status recently.
+     *
+     * @param   target
+     *          Player whose entry is missing
+     * @return  {@code true} if the entry may appear soon, {@code false} if not
+     */
+    private boolean isEntryExpected(@NonNull TabPlayer target) {
+        if (!player.server.canSee(target.server)) return false;
+        long now = System.currentTimeMillis();
+        return now - player.tablistData.lastEntryChange < ENTRY_EXPECTED_WINDOW_MILLIS ||
+                now - target.tablistData.lastEntryChange < ENTRY_EXPECTED_WINDOW_MILLIS;
+    }
+
+    /**
+     * Saves expected display name of an entry without sending any packet. Used for entries which this player
+     * cannot currently have in the tablist, so anti-override can apply the value once the entry is added.
+     *
+     * @param   entry
+     *          Entry to save display name of
+     * @param   displayName
+     *          Expected display name, {@code null} to not force any
+     */
+    public void setExpectedDisplayName(@NonNull UUID entry, @Nullable TabComponent displayName) {
+        if (displayName != null) {
+            forcedDisplayNames.put(entry, displayName);
+        } else {
+            forcedDisplayNames.remove(entry);
         }
     }
 

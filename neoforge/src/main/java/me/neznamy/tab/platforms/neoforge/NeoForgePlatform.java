@@ -102,7 +102,7 @@ public record NeoForgePlatform(MinecraftServer server) implements BackendPlatfor
 
     @Override
     public void registerCommand() {
-        NeoForgeTAB.COMMAND_DISPATCHER.getRoot().addChild(new NeoForgeTabCommand(getCommand()).getCommand());
+        NeoForgeTAB.registerCommand(new NeoForgeTabCommand(getCommand()).getCommand());
     }
 
     @Override
@@ -233,7 +233,7 @@ public record NeoForgePlatform(MinecraftServer server) implements BackendPlatfor
                 return 0;
             }
         };
-        NeoForgeTAB.COMMAND_DISPATCHER.getRoot().addChild(command.getCommand());
+        NeoForgeTAB.registerCommand(command.getCommand());
     }
 
     @Override

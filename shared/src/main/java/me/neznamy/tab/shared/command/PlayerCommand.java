@@ -30,6 +30,10 @@ public class PlayerCommand extends PropertyCommand {
             help(sender);
             return;
         }
+        if (isReservedName(args[0])) {
+            sendMessage(sender, "&c\"" + args[0] + "\" is a reserved name and cannot be used as a player name.");
+            return;
+        }
         if ("remove".equalsIgnoreCase(args[1])) {
             remove(sender, args[0]);
             return;
@@ -57,8 +61,6 @@ public class PlayerCommand extends PropertyCommand {
         } else {
             sendMessage(sender, getMessages().getPlayerValueRemoved(type, player));
         }
-        String[] property = TAB.getInstance().getConfiguration().getUsers().getProperty(player, type, server, world);
-        if (property.length > 0 && String.valueOf(value.isEmpty() ? null : value).equals(String.valueOf(property[0]))) return;
         TAB.getInstance().getConfiguration().getUsers().setProperty(player, type, server, world, value.isEmpty() ? null : value);
         TabPlayer pl = TAB.getInstance().getPlayer(player);
         try {

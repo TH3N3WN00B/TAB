@@ -52,6 +52,11 @@ public class CanvasPacketScoreboard extends NMSPacketScoreboard {
 
     @Override
     public void unregisterTeam(@NonNull Team team) {
+        if (!player.getPlatform().getPlugin().isEnabled()) {
+            // Plugin is being disabled and tasks would be dropped, send directly (remove packet only reads team name)
+            super.unregisterTeam(team);
+            return;
+        }
         // This one too, to avoid register+unregister causing unregister to run first
         player.getPlatform().runSyncGlobal(() -> super.unregisterTeam(team));
     }

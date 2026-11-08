@@ -69,16 +69,18 @@ public class BelowNameProxyPlayerData extends ProxyMessage {
 
     @Override
     public void process(@NotNull ProxySupport proxySupport) {
-        ProxyPlayer target = proxySupport.getProxyPlayers().get(playerId);
+        // Data from a proxy the player is not connected to is queued and applied only if that proxy sends join
+        ProxyPlayer target = proxySupport.getProxyPlayer(playerId, this);
         if (target == null) {
             unknownPlayer(playerId.toString(), "belowname objective update");
             QueuedData data = proxySupport.getQueuedData().computeIfAbsent(playerId, k -> new QueuedData());
-            if (data.getBelowname() == null || data.getBelowname().id < id)  {
+            // IDs are only comparable between messages from the same proxy
+            if (data.getBelowname() == null || !data.getBelowname().isFromSameProxy(this) || data.getBelowname().id < id)  {
                 data.setBelowname(this);
             }
             return;
         }
-        if (target.getBelowname() != null && target.getBelowname().id > id) {
+        if (target.getBelowname() != null && target.getBelowname().isFromSameProxy(this) && target.getBelowname().id > id) {
             TAB.getInstance().debug("Dropping belowname update action for player " + target.getName() + " due to newer action already being present");
             return;
         }

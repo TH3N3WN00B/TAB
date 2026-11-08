@@ -1,11 +1,14 @@
 package me.neznamy.tab.platforms.bukkit;
 
+import io.netty.channel.Channel;
 import me.neznamy.tab.platforms.bukkit.platform.BukkitPlatform;
 import me.neznamy.tab.platforms.bukkit.platform.FoliaPlatform;
 import me.neznamy.tab.shared.ProjectVariables;
+import me.neznamy.tab.shared.ProtocolVersion;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.util.ReflectionUtils;
 import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
@@ -13,6 +16,9 @@ import org.jetbrains.annotations.NotNull;
  * Main class for Bukkit.
  */
 public class BukkitTAB extends JavaPlugin {
+
+    /** Name of the handler injected by NettyTabListEntryTracker */
+    private static final String TABLIST_TRACKER_HANDLER_NAME = "TAB-TablistEntryTracker";
 
     @Override
     public void onEnable() {
@@ -51,5 +57,27 @@ public class BukkitTAB extends JavaPlugin {
     public void onDisable() {
         if (TAB.getInstance() == null) return;
         TAB.getInstance().unload();
+        removeTablistTrackers();
+    }
+
+    /**
+     * Removes tablist entry trackers from pipelines of all online players. They are kept
+     * on TAB reloads, but must not stay injected after the plugin is disabled.
+     */
+    private void removeTablistTrackers() {
+        BukkitPlatform platform = (BukkitPlatform) TAB.getInstance().getPlatform();
+        if (platform.getServerVersionInfo().getServerVersion().getNetworkId() >= ProtocolVersion.V1_8.getNetworkId()) {
+            for (Player player : platform.getOnlinePlayers()) {
+                try {
+                    Channel channel = platform.getServerVersionInfo().getImplementationProvider().getChannel(player);
+                    if (channel != null && channel.pipeline().names().contains(TABLIST_TRACKER_HANDLER_NAME)) {
+                        channel.pipeline().remove(TABLIST_TRACKER_HANDLER_NAME);
+                    }
+                } catch (Exception ignored) {
+                    // Player disconnected in the meantime or fake player
+                }
+            }
+        }
+        TAB.getInstance().getTablistTrackers().clear();
     }
 }

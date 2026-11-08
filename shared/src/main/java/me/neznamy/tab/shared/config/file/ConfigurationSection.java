@@ -146,10 +146,15 @@ public class ConfigurationSection {
 
     @Nullable
     private Object get(@NonNull String key) {
-        for (Map.Entry<Object, Object> entry : map.entrySet()) {
-            if (key.equalsIgnoreCase(entry.getKey().toString())) return entry.getValue();
+        try {
+            for (Map.Entry<Object, Object> entry : map.entrySet()) {
+                if (key.equalsIgnoreCase(entry.getKey().toString())) return entry.getValue();
+            }
+            return null;
+        } catch (ConcurrentModificationException e) {
+            // Map modified by another thread during iteration (such as running /tab group or /tab player)
+            return get(key);
         }
-        return null;
     }
 
     @NotNull

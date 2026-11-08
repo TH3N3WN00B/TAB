@@ -94,8 +94,11 @@ public abstract class SafeBossBar<T> implements BossBar {
 
     /**
      * Freezes the class, not letting any packets through.
+     * If already frozen, the snapshot of BossBars shown before the first freeze is kept,
+     * because changes made while frozen were not sent to the client.
      */
     public synchronized void freeze() {
+        if (frozen) return;
         frozen = true;
         preFreezeBossBars = new ArrayList<>(bossBars.values()); // Make a copy to avoid modifications
     }

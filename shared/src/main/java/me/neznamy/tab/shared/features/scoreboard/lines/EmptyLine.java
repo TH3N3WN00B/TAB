@@ -25,6 +25,7 @@ public class EmptyLine implements ScoreboardLine {
 
     @Override
     public void refresh(@NotNull TabPlayer player) {
+        if (player.scoreboardData.activeScoreboard != holder.getParent()) return; // Player has different scoreboard displayed
         player.scoreboardData.lineProperties.get(holder).scoreProperty.update();
         holder.setScore(player, holder.getForcedPlayerNameStart());
     }

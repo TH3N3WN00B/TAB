@@ -8,8 +8,8 @@ import me.neznamy.tab.shared.proxy.message.outgoing.ExpansionPlaceholder;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Class holding data for TAB's PlaceholderAPI expansion for fast access.
@@ -21,9 +21,9 @@ public class ExpansionData {
     @NotNull
     private final TabPlayer player;
 
-    /** Map of placeholder identifiers to their values */
+    /** Map of placeholder identifiers to their values, accessed from multiple threads */
     @NotNull
-    private final Map<String, String> data = new HashMap<>();
+    private final Map<String, String> data = new ConcurrentHashMap<>();
 
     /**
      * Sets scoreboard visibility placeholder to specified value.

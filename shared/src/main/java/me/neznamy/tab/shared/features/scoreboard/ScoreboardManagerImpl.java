@@ -1,5 +1,6 @@
 package me.neznamy.tab.shared.features.scoreboard;
 
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NonNull;
 import me.neznamy.tab.api.scoreboard.Line;
@@ -53,6 +54,11 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     //active scoreboard announcement
     @Nullable
     private me.neznamy.tab.api.scoreboard.Scoreboard announcement;
+
+    /** Token of the active announcement, so the end of an announcement replaced by a newer one is ignored */
+    @Nullable
+    @Getter(AccessLevel.NONE)
+    private Object announcementToken;
 
     /**
      * Constructs new instance and loads config options.
@@ -116,11 +122,11 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
             connectedPlayer.scoreboardData.joinDelayed = true;
             customThread.executeLater(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
                 if (!connectedPlayer.isOnline()) return; // Player disconnected before the delay ran out
-                setScoreboardVisible(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
+                updateScoreboardVisibility(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
                 connectedPlayer.scoreboardData.joinDelayed = false;
             }, getFeatureName(), TabConstants.CpuUsageCategory.PLAYER_JOIN), configuration.getJoinDelay());
         } else {
-            setScoreboardVisible(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
+            updateScoreboardVisibility(connectedPlayer, configuration.isHiddenByDefault() == (toggleManager != null && toggleManager.contains(connectedPlayer)), false);
         }
     }
 
@@ -196,7 +202,9 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
      * <p>VelocityScoreboardAPI gives proxy objectives priority over downstream
      * objectives. Its display event is therefore the last opportunity to remove
      * TAB's proxy objective before the downstream display packet is cancelled.
-     * This method is intentionally called synchronously by the Velocity hook.</p>
+     * This method is intentionally called synchronously by the Velocity hook and
+     * processes the change directly instead of waiting for the feature thread,
+     * to never block the thread VelocityScoreboardAPI fires the event on.</p>
      *
      * @param receiver
      *          player receiving the packet
@@ -313,13 +321,7 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
         if (removed == null) {
             throw new IllegalArgumentException("No registered scoreboard found with name " + name);
         }
-
-        Set<TabPlayer> players = removed.getPlayers();
-        removed.unregister();
-        for (TabPlayer p : players) {
-            p.scoreboardData.forcedScoreboard = null;
-            sendHighestScoreboard(p);
-        }
+        processRemoval(removed);
     }
 
     @Override
@@ -327,13 +329,29 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
         if (!registeredScoreboards.remove(scoreboard.getName(), (ScoreboardImpl) scoreboard)) {
             throw new IllegalArgumentException("This scoreboard (" + scoreboard.getName() + ") is not registered.");
         }
+        processRemoval((ScoreboardImpl) scoreboard);
+    }
 
-        Set<TabPlayer> players = ((ScoreboardImpl)scoreboard).getPlayers();
-        scoreboard.unregister();
-        for (TabPlayer p : players) {
-            p.scoreboardData.forcedScoreboard = null;
-            sendHighestScoreboard(p);
-        }
+    /**
+     * Removes the scoreboard from all players who can see it or have it forced, sends them
+     * the scoreboard they should see instead and unregisters its features. Processed in feature thread.
+     *
+     * @param   removed
+     *          Scoreboard which was removed from registered scoreboards
+     */
+    private void processRemoval(@NotNull ScoreboardImpl removed) {
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            definedScoreboards = Arrays.stream(definedScoreboards).filter(s -> s != removed).toArray(ScoreboardImpl[]::new);
+            List<TabPlayer> players = new ArrayList<>(removed.getPlayers()); // Copy, because unregister() clears the set
+            removed.unregister();
+            for (TabPlayer p : TAB.getInstance().getOnlinePlayers()) {
+                if (p.scoreboardData.forcedScoreboard == removed) p.scoreboardData.forcedScoreboard = null;
+            }
+            for (TabPlayer p : players) {
+                sendHighestScoreboard(p);
+            }
+            removed.unregisterFeatures();
+        }, getFeatureName(), "Removing Scoreboard"));
     }
 
     @Override
@@ -388,6 +406,24 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     public void setScoreboardVisible(@NonNull me.neznamy.tab.api.TabPlayer p, boolean visible, boolean sendToggleMessage) {
         ensureActive();
         TabPlayer player = (TabPlayer) p;
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!player.isOnline()) return; // Player disconnected in the meantime
+            updateScoreboardVisibility(player, visible, sendToggleMessage);
+        }, getFeatureName(), "Toggling Scoreboard"));
+    }
+
+    /**
+     * Sets scoreboard visibility of player to set value. If value did not change, nothing happens.
+     * Must be called from feature thread.
+     *
+     * @param   player
+     *          Player to set scoreboard visibility of
+     * @param   visible
+     *          {@code true} if scoreboard should be visible, {@code false} if not
+     * @param   sendToggleMessage
+     *          {@code true} if toggle message should be sent if value changed, {@code false} if not
+     */
+    private void updateScoreboardVisibility(@NotNull TabPlayer player, boolean visible, boolean sendToggleMessage) {
         if (player.scoreboardData.visible == visible) return;
         if (visible) {
             player.scoreboardData.visible = true;
@@ -420,9 +456,13 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
     }
 
     @Override
-    public void toggleScoreboard(@NonNull me.neznamy.tab.api.TabPlayer player, boolean sendToggleMessage) {
+    public void toggleScoreboard(@NonNull me.neznamy.tab.api.TabPlayer p, boolean sendToggleMessage) {
         ensureActive();
-        setScoreboardVisible(player, !((TabPlayer)player).scoreboardData.visible, sendToggleMessage);
+        TabPlayer player = (TabPlayer) p;
+        customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
+            if (!player.isOnline()) return; // Player disconnected in the meantime
+            updateScoreboardVisibility(player, !player.scoreboardData.visible, sendToggleMessage);
+        }, getFeatureName(), "Toggling Scoreboard"));
     }
 
     @Override
@@ -431,23 +471,25 @@ public class ScoreboardManagerImpl extends RefreshableFeature implements Scorebo
         if (duration < 0) throw new IllegalArgumentException("Duration cannot be negative");
         ScoreboardImpl sb = registeredScoreboards.get(scoreboard);
         if (sb == null) throw new IllegalArgumentException("No registered scoreboard found with name " + scoreboard);
-        Map<TabPlayer, ScoreboardImpl> previous = new HashMap<>();
+        Object token = new Object();
         customThread.execute(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
             announcement = sb;
+            announcementToken = token;
             for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
                 if (!hasScoreboardVisible(all)) continue;
-                previous.put(all, all.scoreboardData.activeScoreboard);
-                if (all.scoreboardData.activeScoreboard != null) all.scoreboardData.activeScoreboard.removePlayer(all);
+                ScoreboardImpl active = all.scoreboardData.activeScoreboard;
+                if (active != null && active != sb) active.removePlayer(all);
                 sb.addPlayer(all);
             }
         }, getFeatureName(), "Adding announced Scoreboard"));
         customThread.executeLater(new TimedCaughtTask(TAB.getInstance().getCpu(), () -> {
-            for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
-                if (!hasScoreboardVisible(all)) continue;
-                sb.removePlayer(all);
-                if (previous.get(all) != null) previous.get(all).addPlayer(all);
-            }
+            if (announcementToken != token) return; // Replaced by a newer announcement, which restores scoreboards when it ends
             announcement = null;
+            announcementToken = null;
+            for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
+                // Replaces whatever is displayed now with what player should see, respecting forced scoreboard and toggle
+                sendHighestScoreboard(all);
+            }
         }, getFeatureName(), "Removing announced Scoreboard"), duration*1000);
     }
 

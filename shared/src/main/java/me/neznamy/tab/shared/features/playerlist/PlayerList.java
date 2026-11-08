@@ -16,6 +16,7 @@ import me.neznamy.tab.shared.features.proxy.ProxyPlayer;
 import me.neznamy.tab.shared.features.proxy.ProxySupport;
 import me.neznamy.tab.shared.features.types.*;
 import me.neznamy.tab.shared.platform.TabPlayer;
+import me.neznamy.tab.shared.platform.decorators.TrackedTabList;
 import me.neznamy.tab.shared.util.DumpUtils;
 import me.neznamy.tab.shared.util.cache.StringToComponentCache;
 import org.jetbrains.annotations.NotNull;
@@ -60,6 +61,26 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
             }
         }
         viewer.getTabList().updateDisplayName(target, displayName);
+    }
+
+    /**
+     * Updates display name of a proxy player for viewer. If viewer's server cannot see the proxy player's server,
+     * the entry cannot be in viewer's tablist, so only the expected value is saved for anti-override
+     * instead of sending an update for a missing entry.
+     *
+     * @param   viewer
+     *          Player viewing the tablist
+     * @param   target
+     *          Proxy player to update display name of
+     * @param   displayName
+     *          Display name to use, {@code null} to reset it
+     */
+    void updateDisplayName(@NotNull TabPlayer viewer, @NotNull ProxyPlayer target, @Nullable TabComponent displayName) {
+        if (viewer.server.canSee(target.server)) {
+            viewer.getTabList().updateDisplayName(target.getTablistId(), displayName);
+        } else {
+            ((TrackedTabList<?>) viewer.getTabList()).setExpectedDisplayName(target.getTablistId(), displayName);
+        }
     }
 
     /**
@@ -148,6 +169,7 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
 
     @Override
     public void onServerChange(@NotNull TabPlayer p, @NotNull Server from, @NotNull Server to) {
+        p.tablistData.lastEntryChange = System.currentTimeMillis();
         updateProperties(p);
         formatPlayerForEveryone(p, true); // Always update because this feature only affects the same server (group)
         if (TAB.getInstance().getFeatureManager().isFeatureEnabled(TabConstants.Feature.PIPELINE_INJECTION)) return;
@@ -160,8 +182,8 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
             }
             if (proxy != null) {
                 for (ProxyPlayer proxied : proxy.getProxyPlayers().values()) {
-                    if (proxied.getTabFormat() == null) continue;
-                    p.getTabList().updateDisplayName(proxied.getTablistId(), proxied.getTabFormat().getFormatComponent());
+                    if (proxied.getTabFormat() == null || proxied.getTabFormat().isDisabled()) continue;
+                    updateDisplayName(p, proxied, proxied.getTabFormat().getFormatComponent());
                 }
             }
         }, getFeatureName(), CpuUsageCategory.SERVER_SWITCH), 300);
@@ -227,6 +249,7 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
 
     @Override
     public void onJoin(@NotNull TabPlayer connectedPlayer) {
+        connectedPlayer.tablistData.lastEntryChange = System.currentTimeMillis();
         loadProperties(connectedPlayer);
         if (disableChecker.isDisableConditionMet(connectedPlayer)) {
             connectedPlayer.tablistData.disabled.set(true);
@@ -241,8 +264,8 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
             }
             if (proxy != null) {
                 for (ProxyPlayer proxied : proxy.getProxyPlayers().values()) {
-                    if (proxied.getTabFormat() == null) continue;
-                    connectedPlayer.getTabList().updateDisplayName(proxied.getTablistId(), proxied.getTabFormat().getFormatComponent());
+                    if (proxied.getTabFormat() == null || proxied.getTabFormat().isDisabled()) continue;
+                    updateDisplayName(connectedPlayer, proxied, proxied.getTabFormat().getFormatComponent());
                 }
             }
         };
@@ -257,6 +280,7 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
 
     @Override
     public void onVanishStatusChange(@NotNull TabPlayer player) {
+        player.tablistData.lastEntryChange = System.currentTimeMillis();
         if (player.isVanished()) return;
         formatPlayerForEveryone(player, true);
     }
@@ -458,9 +482,11 @@ public class PlayerList extends RefreshableFeature implements TabListFormatManag
      */
     public void formatPlayerForEveryone(@NotNull ProxyPlayer player) {
         if (player.isVanished()) return;
-        if (player.getTabFormat() == null) return; // Player not loaded yet
+        PlayerListProxyPlayerData format = player.getTabFormat();
+        if (format == null) return; // Player not loaded yet
+        if (format.isDisabled()) return; // Feature disabled for the player with condition
         for (TabPlayer viewer : TAB.getInstance().getOnlinePlayers()) {
-            viewer.getTabList().updateDisplayName(player.getTablistId(), player.getTabFormat().getFormatComponent());
+            updateDisplayName(viewer, player, format.getFormatComponent());
         }
     }
 

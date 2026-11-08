@@ -6,11 +6,11 @@ import me.neznamy.tab.shared.platform.TabList.Skin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Skin manager for retrieving player skins from various sources.
@@ -18,7 +18,7 @@ import java.util.Map.Entry;
 public class SkinManager {
 
     /** Skins defined in configuration that are invalid */
-    private final List<String> invalidSkins = new ArrayList<>();
+    private final Set<String> invalidSkins = ConcurrentHashMap.newKeySet();
 
     /** Registered skin patterns and their sources */
     private final Map<String, SkinSource> sources = new HashMap<>();
@@ -51,7 +51,13 @@ public class SkinManager {
 
         for (Entry<String, SkinSource> entry : sources.entrySet()) {
             if (skin.startsWith(entry.getKey() + ":")) {
-                Skin value = entry.getValue().getSkin(skin.substring(entry.getKey().length() + 1));
+                Skin value;
+                try {
+                    value = entry.getValue().getSkin(skin.substring(entry.getKey().length() + 1));
+                } catch (RuntimeException e) {
+                    TAB.getInstance().getErrorManager().printError("Failed to get skin \"" + skin + "\"", e);
+                    value = null;
+                }
                 if (value == null) {
                     // Skin source failed to provide a skin, warn and remember as invalid
                     invalidSkins.add(skin);

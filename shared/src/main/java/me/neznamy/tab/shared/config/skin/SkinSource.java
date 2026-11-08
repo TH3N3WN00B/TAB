@@ -11,15 +11,23 @@ import org.json.simple.parser.ParseException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URL;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Abstract class for skin sources for getting skins.
  */
 public abstract class SkinSource {
+
+    /** Timeout for connecting to skin APIs in milliseconds */
+    protected static final int CONNECT_TIMEOUT = 5000;
+
+    /** Timeout for reading responses from skin APIs in milliseconds */
+    protected static final int READ_TIMEOUT = 10000;
 
     /** Configuration file for storing cache */
     @NotNull private final ConfigurationFile file;
@@ -27,11 +35,11 @@ public abstract class SkinSource {
     /** Cache path of this source */
     @NotNull private final String path;
 
-    /** Current cache of this source */
+    /** Current cache of this source, access must be synchronized on {@link #file}, which saves it */
     @NotNull private final Map<String, List<String>> cache;
 
     /** Cached skins as skin objects */
-    @NotNull private final Map<String, Skin> skins = new HashMap<>();
+    @NotNull private final Map<String, Skin> skins = new ConcurrentHashMap<>();
 
     protected SkinSource(@NotNull ConfigurationFile file, @NotNull String path) {
         this.file = file;
@@ -57,8 +65,11 @@ public abstract class SkinSource {
         Skin downloaded = download(skin);
         if (downloaded != null) {
             skins.put(skin, downloaded);
-            cache.put(skin, Arrays.asList(downloaded.getValue(), downloaded.getSignature()));
-            file.set(path, cache);
+            // All sources share the same file, synchronize so the cache is not modified while the file is being saved
+            synchronized (file) {
+                cache.put(skin, Arrays.asList(downloaded.getValue(), downloaded.getSignature()));
+                file.set(path, cache);
+            }
         }
         return downloaded;
     }
@@ -75,7 +86,10 @@ public abstract class SkinSource {
 
     @NotNull
     protected JSONObject getResponse(@NotNull String url) throws IOException, ParseException {
-        try (InputStreamReader reader = new InputStreamReader(new URL(url).openStream())) {
+        URLConnection connection = new URL(url).openConnection();
+        connection.setConnectTimeout(CONNECT_TIMEOUT);
+        connection.setReadTimeout(READ_TIMEOUT);
+        try (InputStreamReader reader = new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)) {
             return (JSONObject) new JSONParser().parse(reader);
         }
     }

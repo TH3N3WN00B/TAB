@@ -81,7 +81,12 @@ public class BukkitTabPlayer extends BackendTabPlayer {
     @Override
     public void setBelowNameDistance(double distance) {
         if (BELOW_NAME_DISTANCE != null) {
-            getPlayer().getAttribute(BELOW_NAME_DISTANCE).setBaseValue(distance);
+            Runnable task = () -> getPlayer().getAttribute(BELOW_NAME_DISTANCE).setBaseValue(distance);
+            if (getPlatform().getPlugin().isEnabled()) {
+                getPlatform().runSync(getPlayer(), task); // Attributes must be modified in the entity's thread
+            } else {
+                task.run(); // Plugin is being disabled (called from onDisable), tasks can no longer be scheduled
+            }
         }
     }
 

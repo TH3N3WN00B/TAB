@@ -65,6 +65,9 @@ public class BossBarLine implements BossBar {
     private int announceTimeTotalSeconds;
     private long announceEndSystemTime;
 
+    /** Number of announcements of this bar, used to ignore the end of an announcement replaced by a newer one */
+    private int announcementCounter;
+
     @NotNull
     private final ServerPlaceholder announceEndPlaceholder;
 
@@ -132,7 +135,7 @@ public class BossBarLine implements BossBar {
     @NotNull
     public BarColor parseColor(@NotNull TabPlayer player, @NonNull String color) {
         try {
-            return BarColor.valueOf(color);
+            return BarColor.valueOf(color.toUpperCase(Locale.US));
         } catch (IllegalArgumentException e) {
             TAB.getInstance().getConfigHelper().runtime().invalidBossBarProperty(
                     this,
@@ -158,7 +161,7 @@ public class BossBarLine implements BossBar {
     @NotNull
     public BarStyle parseStyle(@NotNull TabPlayer player, @NonNull String style) {
         try {
-            return BarStyle.valueOf(style);
+            return BarStyle.valueOf(style.toUpperCase(Locale.US));
         } catch (IllegalArgumentException e) {
             TAB.getInstance().getConfigHelper().runtime().invalidBossBarProperty(
                     this,
@@ -211,7 +214,14 @@ public class BossBarLine implements BossBar {
         players.remove(player);
     }
 
-    public void announce(int timeSeconds) {
+    /**
+     * Announces this bar to all players who can see it for specified amount of time.
+     *
+     * @param   timeSeconds
+     *          Duration of the announcement in seconds
+     * @return  ID of this announcement to pass to {@link #unAnnounce(int)} when it ends
+     */
+    public int announce(int timeSeconds) {
         announceTimeTotalSeconds = timeSeconds;
         announceEndSystemTime = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(timeSeconds);
         announceEndPlaceholder.update();
@@ -220,18 +230,44 @@ public class BossBarLine implements BossBar {
                 addPlayer(all);
             }
         }
+        return ++announcementCounter;
     }
 
     public boolean isBeingAnnounced() {
         return announceEndSystemTime > System.currentTimeMillis();
     }
 
-    public void unAnnounce() {
+    /**
+     * Ends announcement with given ID. If this bar was announced again since then,
+     * nothing happens, because the newer announcement is still running.
+     *
+     * @param   announcementId
+     *          ID of the announcement returned by {@link #announce(int)}
+     */
+    public void unAnnounce(int announcementId) {
+        if (announcementId != announcementCounter) return; // Announced again, the newer announcement is still running
+        announceEndSystemTime = System.currentTimeMillis(); // Make sure isBeingAnnounced() returns false from now on
         for (TabPlayer all : TAB.getInstance().getOnlinePlayers()) {
             if (manager.hasBossBarVisible(all)) {
                 removePlayer(all);
             }
         }
+    }
+
+    /**
+     * Unregisters features and placeholders registered by this bar. Called when this bar is removed.
+     */
+    public void unregisterFeatures() {
+        TAB.getInstance().getFeatureManager().unregisterFeature(TabConstants.Feature.bossBarTitle(name));
+        TAB.getInstance().getFeatureManager().unregisterFeature(TabConstants.Feature.bossBarProgress(name));
+        TAB.getInstance().getFeatureManager().unregisterFeature(TabConstants.Feature.bossBarColor(name));
+        TAB.getInstance().getFeatureManager().unregisterFeature(TabConstants.Feature.bossBarStyle(name));
+        TAB.getInstance().getPlaceholderManager().removeUsedFeature(textRefresher);
+        TAB.getInstance().getPlaceholderManager().removeUsedFeature(progressRefresher);
+        TAB.getInstance().getPlaceholderManager().removeUsedFeature(colorRefresher);
+        TAB.getInstance().getPlaceholderManager().removeUsedFeature(styleRefresher);
+        TAB.getInstance().getPlaceholderManager().unregisterPlaceholder(TabConstants.Placeholder.bossbarAnnounceTotal(name));
+        TAB.getInstance().getPlaceholderManager().unregisterPlaceholder(TabConstants.Placeholder.bossbarAnnounceLeft(name));
     }
 
     // ------------------

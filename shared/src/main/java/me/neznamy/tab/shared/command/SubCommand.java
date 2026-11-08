@@ -151,13 +151,14 @@ public abstract class SubCommand {
         }
         if (arguments.length < 2) {
             List<String> suggestions = new ArrayList<>();
-            for (String subcommand : subcommands.keySet()) {
-                if (subcommand.startsWith(argument)) suggestions.add(subcommand);
+            for (Map.Entry<String, SubCommand> subcommand : subcommands.entrySet()) {
+                // Only suggest subcommands the sender can actually run
+                if (subcommand.getKey().startsWith(argument) && subcommand.getValue().hasPermission(sender)) suggestions.add(subcommand.getKey());
             }
             return suggestions;
         }
         SubCommand subcommand = subcommands.get(argument);
-        if (subcommand != null) {
+        if (subcommand != null && subcommand.hasPermission(sender)) {
             return subcommand.complete(sender, Arrays.copyOfRange(arguments, 1, arguments.length));
         }
         return Collections.emptyList();

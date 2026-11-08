@@ -6,7 +6,11 @@ import lombok.Setter;
 import me.neznamy.tab.api.placeholder.Placeholder;
 import me.neznamy.tab.shared.TAB;
 import me.neznamy.tab.shared.TabConstants;
+import me.neznamy.tab.shared.cpu.CpuManager;
+import me.neznamy.tab.shared.cpu.TimedCaughtTask;
 import me.neznamy.tab.shared.features.PlaceholderManagerImpl;
+import me.neznamy.tab.shared.features.types.CustomThreaded;
+import me.neznamy.tab.shared.features.types.RefreshableFeature;
 import me.neznamy.tab.shared.placeholders.PlaceholderIdentifier;
 import me.neznamy.tab.shared.placeholders.PlaceholderReference;
 import me.neznamy.tab.shared.placeholders.PlaceholderReplacementPattern;
@@ -136,6 +140,31 @@ public abstract class TabPlaceholder implements Placeholder {
         for (PlaceholderReference pl : new ArrayList<>(reference.getParents())) {
             pl.getHandle().updateFromNested(player);
             pl.getHandle().updateParents(player);
+        }
+    }
+
+    /**
+     * Refreshes given feature for given player after a placeholder change. If the feature has its own thread,
+     * the refresh is submitted to it. Otherwise, it runs in the main processing thread - directly if already
+     * called from it, or submitted to it if called from another thread (such as server thread or an API call)
+     * to prevent concurrent access to the feature's state.
+     *
+     * @param   feature
+     *          Feature to refresh
+     * @param   player
+     *          Player to refresh the feature for
+     * @param   force
+     *          Whether refresh should be forced or not
+     */
+    protected static void refreshFeature(@NotNull RefreshableFeature feature, @NotNull TabPlayer player, boolean force) {
+        CpuManager cpu = TAB.getInstance().getCpu();
+        TimedCaughtTask task = new TimedCaughtTask(cpu, () -> feature.refresh(player, force), feature.getFeatureName(), feature.getRefreshDisplayName());
+        if (feature instanceof CustomThreaded) {
+            ((CustomThreaded) feature).getCustomThread().execute(task);
+        } else if (cpu.getProcessingThread().isCurrentThread()) {
+            task.run();
+        } else {
+            cpu.getProcessingThread().execute(task);
         }
     }
 

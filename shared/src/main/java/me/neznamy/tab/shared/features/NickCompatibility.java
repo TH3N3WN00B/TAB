@@ -12,12 +12,10 @@ import me.neznamy.tab.shared.features.proxy.ProxyPlayer;
 import me.neznamy.tab.shared.features.proxy.ProxySupport;
 import me.neznamy.tab.shared.features.types.EntryAddListener;
 import me.neznamy.tab.shared.features.types.TabFeature;
-import me.neznamy.tab.shared.platform.Scoreboard;
 import me.neznamy.tab.shared.platform.TabPlayer;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
 import java.util.UUID;
 
 /**
@@ -50,15 +48,16 @@ public class NickCompatibility extends TabFeature implements EntryAddListener {
             ProxyPlayer proxyPlayer = proxy.getProxyPlayers().get(id);
             if (proxyPlayer == null) return;
             if (!proxyPlayer.getNickname().equals(name)) {
+                String oldNickname = proxyPlayer.getNickname();
                 proxyPlayer.setNickname(name);
                 TAB.getInstance().debug("[Proxy Support] Processing name change of proxy player " + proxyPlayer.getName() + " to " + name);
-                processNameChange(proxyPlayer);
+                processNameChange(proxyPlayer, oldNickname);
             }
         }
     }
 
     /**
-     * Processes name change in all features.
+     * Processes name change in all features. Each feature processes the change in its own thread.
      *
      * @param   player
      *          Player to update in all features
@@ -66,68 +65,26 @@ public class NickCompatibility extends TabFeature implements EntryAddListener {
     public void processNameChange(@NotNull TabPlayer player) {
         CpuManager cpu = TAB.getInstance().getCpu();
         cpu.getProcessingThread().execute(new TimedCaughtTask(cpu, () -> {
-            if (nameTags != null && !player.teamData.isDisabled())
-                for (TabPlayer viewer : nameTags.getOnlinePlayers().getPlayers()) {
-                    viewer.teamData.unregisterTeam(player);
-                    viewer.teamData.registerTeam(
-                            player,
-                            player.sortingData.getShortTeamName(),
-                            nameTags.getPrefixCache().get(player.teamData.prefix.getFormat(viewer)),
-                            nameTags.getSuffixCache().get(player.teamData.suffix.getFormat(viewer)),
-                            player.teamData.getTeamVisibility(viewer) ? Scoreboard.NameVisibility.ALWAYS : Scoreboard.NameVisibility.NEVER,
-                            player.teamData.getCollisionRule() ? Scoreboard.CollisionRule.ALWAYS : Scoreboard.CollisionRule.NEVER,
-                            Collections.singletonList(player.getNickname()),
-                            nameTags.getTeamOptions(),
-                            nameTags.getLastColorCache().get(player.teamData.prefix.getFormat(viewer)).getLastStyle().toEnumChatFormat()
-                    );
-                }
+            if (nameTags != null) nameTags.processNicknameChange(player);
             if (belowname != null) belowname.processNicknameChange(player);
             if (yellownumber != null) yellownumber.processNicknameChange(player);
         }, getFeatureName(), CpuUsageCategory.NICK_PLUGIN_COMPATIBILITY));
     }
 
-    private void processNameChange(ProxyPlayer player) {
+    /**
+     * Processes name change of a proxy player in all features. Each feature processes the change in its own thread.
+     *
+     * @param   player
+     *          Proxy player to update in all features
+     * @param   oldNickname
+     *          Nickname the player had before
+     */
+    private void processNameChange(@NotNull ProxyPlayer player, @NotNull String oldNickname) {
         CpuManager cpu = TAB.getInstance().getCpu();
         cpu.getProcessingThread().execute(new TimedCaughtTask(cpu, () -> {
-            if (nameTags != null && player.getNametag() != null) {
-                String teamName = player.getNametag().getResolvedTeamName();
-                for (TabPlayer viewer : nameTags.getOnlinePlayers().getPlayers()) {
-                    viewer.teamData.unregisterTeam(player);
-                    viewer.teamData.registerTeam(
-                            player,
-                            teamName,
-                            player.getNametag().getFeature().getPrefixCache().get(player.getNametag().getPrefix()),
-                            player.getNametag().getFeature().getSuffixCache().get(player.getNametag().getSuffix()),
-                            player.getNametag().getNameVisibility(),
-                            Scoreboard.CollisionRule.ALWAYS,
-                            Collections.singletonList(player.getNickname()),
-                            nameTags.getTeamOptions(),
-                            player.getNametag().getFeature().getLastColorCache().get(player.getNametag().getPrefix()).getLastStyle().toEnumChatFormat()
-                    );
-                }
-            }
-            if (belowname != null && player.getBelowname() != null) {
-                for (TabPlayer all : belowname.getOnlinePlayers().getPlayers()) {
-                    all.getScoreboard().setScore(
-                            BelowName.OBJECTIVE_NAME,
-                            player.getNickname(),
-                            player.getBelowname().getValue(),
-                            null, // Unused by this objective slot
-                            player.getBelowname().getFeature().getCache().get(player.getBelowname().getFancyValue())
-                    );
-                }
-            }
-            if (yellownumber != null && player.getPlayerlist() != null) {
-                for (TabPlayer all : yellownumber.getOnlinePlayers().getPlayers()) {
-                    all.getScoreboard().setScore(
-                            YellowNumber.OBJECTIVE_NAME,
-                            player.getNickname(),
-                            player.getPlayerlist().getValue(),
-                            null, // Unused by this objective slot
-                            player.getPlayerlist().getFeature().getCache().get(player.getPlayerlist().getFancyValue())
-                    );
-                }
-            }
+            if (nameTags != null) nameTags.processNicknameChange(player);
+            if (belowname != null) belowname.processNicknameChange(player, oldNickname);
+            if (yellownumber != null) yellownumber.processNicknameChange(player, oldNickname);
         }, getFeatureName(), CpuUsageCategory.NICK_PLUGIN_COMPATIBILITY));
     }
 
